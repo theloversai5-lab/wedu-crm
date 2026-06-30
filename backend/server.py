@@ -559,8 +559,8 @@ async def login(credentials: UserLogin, response: Response):
     access_token = create_access_token(user_id, email, user["role"])
     refresh_token = create_refresh_token(user_id)
     
-    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=False, samesite="lax", max_age=900, path="/")
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
+    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=900, path="/")
+    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     
     user_data = serialize_doc(user)
     user_data.pop("password_hash", None)
@@ -568,8 +568,8 @@ async def login(credentials: UserLogin, response: Response):
 
 @api_router.post("/auth/logout")
 async def logout(response: Response):
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    response.delete_cookie("access_token", path="/", secure=True, samesite="none")
+    response.delete_cookie("refresh_token", path="/", secure=True, samesite="none")
     return {"message": "Logged out successfully"}
 
 @api_router.get("/auth/me")
@@ -596,7 +596,7 @@ async def refresh_token(request: Request, response: Response):
         user_id = str(user["_id"])
         access_token = create_access_token(user_id, user["email"], user["role"])
         
-        response.set_cookie(key="access_token", value=access_token, httponly=True, secure=False, samesite="lax", max_age=900, path="/")
+        response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=900, path="/")
         
         return {"message": "Token refreshed"}
     except jwt.ExpiredSignatureError:
@@ -747,7 +747,7 @@ async def update_profile(body: ProfileUpdate, request: Request, response: Respon
     # If email changed, re-issue tokens with new email
     updated_user = await db.users.find_one({"_id": ObjectId(user_id)})
     new_access = create_access_token(user_id, updated_user["email"], updated_user["role"])
-    response.set_cookie(key="access_token", value=new_access, httponly=True, secure=False, samesite="lax", max_age=900, path="/")
+    response.set_cookie(key="access_token", value=new_access, httponly=True, secure=True, samesite="none", max_age=900, path="/")
 
     result = serialize_doc(updated_user)
     result.pop("password_hash", None)
