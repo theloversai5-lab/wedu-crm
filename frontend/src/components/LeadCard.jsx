@@ -34,26 +34,15 @@ const CATEGORIES = [
     'Foreign', 'Future Projection', 'Needs Review', 'Not Interested'
 ];
 
-const PIPELINE_STAGES = [
-    "New Contact", "Interested", "Send Portfolio", "Time Given",
-    "Meeting Scheduled", "Meeting Done", "Project Follow-up", "Onboarded",
-    "Unknown", "Call Again 1", "Call Again 2", "Call Again 3",
-    "Not Answering", "Not Interested"
-];
 
 export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = false }) {
     const [expanded, setExpanded] = useState(false);
     const [saving, setSaving] = useState(false);
     
-    // Form state
     const [response, setResponse] = useState('');
     const [notes, setNotes] = useState('');
-    const [nextFollowupDate, setNextFollowupDate] = useState('');
-    const [nextFollowupTime, setNextFollowupTime] = useState('10:00');
-    const [portfolioSent, setPortfolioSent] = useState(false);
-    const [priceListSent, setPriceListSent] = useState(false);
-    const [waSent, setWaSent] = useState(false);
-    const [newPipelineStage, setNewPipelineStage] = useState('');
+    const [followUpDate, setFollowUpDate] = useState('');
+    const [followUpTime, setFollowUpTime] = useState('10:00');
     const [newCategory, setNewCategory] = useState('');
 
     const assignedMember = teamMembers?.find(m => m.id === lead.assignedTo);
@@ -69,23 +58,19 @@ export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = fal
         try {
             // Build followup datetime
             let followupDateTime = null;
-            if (nextFollowupDate) {
-                followupDateTime = `${nextFollowupDate}T${nextFollowupTime || '10:00'}:00`;
+            if (followUpDate) {
+                followupDateTime = `${followUpDate}T${followUpTime || '10:00'}:00`;
             }
 
             // Log response
             await axios.post(`${API_URL}/api/leads/${lead.id}/response`, {
                 response,
                 notes,
-                nextFollowupDate: followupDateTime,
-                portfolioSent,
-                priceListSent,
-                waSent
+                followUpDate: followupDateTime
             }, { withCredentials: true });
 
-            // Update pipeline stage and category if changed
+            // Update category if changed
             const updates = {};
-            if (newPipelineStage) updates.pipelineStage = newPipelineStage;
             if (newCategory) updates.category = newCategory;
             
             if (Object.keys(updates).length > 0) {
@@ -95,12 +80,8 @@ export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = fal
             // Reset form
             setResponse('');
             setNotes('');
-            setNextFollowupDate('');
-            setNextFollowupTime('10:00');
-            setPortfolioSent(false);
-            setPriceListSent(false);
-            setWaSent(false);
-            setNewPipelineStage('');
+            setFollowUpDate('');
+            setFollowUpTime('10:00');
             setNewCategory('');
             setExpanded(false);
             
@@ -186,16 +167,18 @@ export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = fal
                         <Phone size={10} />
                         {lead.callCount || 0} calls
                     </span>
-                    {lead.portfolioSent && (
-                        <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200 px-2 py-0">
-                            <Check size={10} className="mr-1" />
-                            Portfolio Sent
-                        </Badge>
-                    )}
-                    {lead.nextFollowupDate && (
+                    {lead.followUpDate && (
                         <span className="text-[11px] text-gray-500 flex items-center gap-1">
                             <Calendar size={10} />
-                            {new Date(lead.nextFollowupDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                            {new Date(lead.followUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                            <Clock size={10} className="ml-1" />
+                            {new Date(lead.followUpDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                    )}
+                    {lead.googleCalendarEventId && (
+                        <span className="text-[11px] text-blue-600 flex items-center gap-1 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                            <Check size={10} />
+                            Synced to Calendar
                         </span>
                     )}
                 </div>
@@ -275,11 +258,11 @@ export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = fal
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="space-y-2">
-                            <Label className="text-[11px]">Next Follow-up Date</Label>
+                            <Label className="text-[11px]">Follow-up Date</Label>
                             <Input
                                 type="date"
-                                value={nextFollowupDate}
-                                onChange={(e) => setNextFollowupDate(e.target.value)}
+                                value={followUpDate}
+                                onChange={(e) => setFollowUpDate(e.target.value)}
                                 className="h-9 text-[12px] rounded-[8px] bg-white"
                             />
                         </div>
@@ -287,23 +270,10 @@ export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = fal
                             <Label className="text-[11px]">Time</Label>
                             <Input
                                 type="time"
-                                value={nextFollowupTime}
-                                onChange={(e) => setNextFollowupTime(e.target.value)}
+                                value={followUpTime}
+                                onChange={(e) => setFollowUpTime(e.target.value)}
                                 className="h-9 text-[12px] rounded-[8px] bg-white"
                             />
-                        </div>
-                        <div className="space-y-2">
-                            <Label className="text-[11px]">Move to Pipeline</Label>
-                            <Select value={newPipelineStage || undefined} onValueChange={setNewPipelineStage}>
-                                <SelectTrigger className="h-9 text-[12px] rounded-[8px] bg-white">
-                                    <SelectValue placeholder="Keep current" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {PIPELINE_STAGES.map(s => (
-                                        <SelectItem key={s} value={s} className="text-[12px]">{s}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
                         </div>
                         <div className="space-y-2">
                             <Label className="text-[11px]">Move to Category</Label>
@@ -318,21 +288,6 @@ export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = fal
                                 </SelectContent>
                             </Select>
                         </div>
-                    </div>
-
-                    <div className="flex items-center gap-4 flex-wrap">
-                        <label className="flex items-center gap-2 text-[12px]">
-                            <Checkbox checked={portfolioSent} onCheckedChange={setPortfolioSent} className="h-4 w-4" />
-                            Portfolio Sent
-                        </label>
-                        <label className="flex items-center gap-2 text-[12px]">
-                            <Checkbox checked={priceListSent} onCheckedChange={setPriceListSent} className="h-4 w-4" />
-                            Price List Sent
-                        </label>
-                        <label className="flex items-center gap-2 text-[12px]">
-                            <Checkbox checked={waSent} onCheckedChange={setWaSent} className="h-4 w-4" />
-                            WA Message Sent
-                        </label>
                     </div>
 
                     <div className="flex justify-end">

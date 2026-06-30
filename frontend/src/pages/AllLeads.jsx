@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
     ChevronDown, ChevronUp, Phone,
     Download, Upload, Plus, Trash2, Users, Check, Edit2,
-    ArrowUpDown, PhoneCall
+    ArrowUpDown, PhoneCall, ExternalLink
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Checkbox } from '../components/ui/checkbox';
@@ -27,14 +27,15 @@ import { Badge } from '../components/ui/badge';
 import CallLogPanel from '../components/CallLogPanel';
 import ImportModal from '../components/ImportModal';
 import AddLeadModal from '../components/AddLeadModal';
+import CallbackSchedulerModal from '../components/CallbackSchedulerModal';
 
 import { LeadFilterBar } from '../components/LeadFilterBar';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
 const CATEGORIES = [
-    'Meeting Done', 'Interested', 'Call Back', 'Busy', 'No Response',
-    'Foreign', 'Future Projection', 'Needs Review', 'Not Interested'
+    'Meeting Done', 'Highly Interested', 'MND', 'Ongoing Project',
+    'Send Portfolio', 'Callback'
 ];
 
 const PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Review', 'Archive'];
@@ -42,14 +43,11 @@ const PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Review', 'Archive'];
 const getCategoryStyle = (category) => {
     const styles = {
         'Meeting Done': 'bg-green-100 text-green-800 border-green-200',
-        'Interested': 'bg-blue-100 text-blue-800 border-blue-200',
-        'Call Back': 'bg-orange-100 text-orange-800 border-orange-200',
-        'Busy': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-        'No Response': 'bg-gray-100 text-gray-700 border-gray-200',
-        'Foreign': 'bg-purple-100 text-purple-800 border-purple-200',
-        'Future Projection': 'bg-teal-100 text-teal-800 border-teal-200',
-        'Needs Review': 'bg-gray-50 text-gray-600 border-gray-200',
-        'Not Interested': 'bg-red-100 text-red-800 border-red-200'
+        'Highly Interested': 'bg-blue-100 text-blue-800 border-blue-200',
+        'MND': 'bg-purple-100 text-purple-800 border-purple-200',
+        'Ongoing Project': 'bg-teal-100 text-teal-800 border-teal-200',
+        'Send Portfolio': 'bg-orange-100 text-orange-800 border-orange-200',
+        'Callback': 'bg-yellow-100 text-yellow-800 border-yellow-200'
     };
     return styles[category] || 'bg-gray-100 text-gray-600';
 };
@@ -57,14 +55,11 @@ const getCategoryStyle = (category) => {
 const getRowBgColor = (category) => {
     const colors = {
         'Meeting Done': 'bg-green-50/50',
-        'Interested': 'bg-blue-50/50',
-        'Call Back': 'bg-orange-50/50',
-        'Busy': 'bg-yellow-50/50',
-        'No Response': 'bg-gray-50/50',
-        'Foreign': 'bg-purple-50/50',
-        'Future Projection': 'bg-teal-50/50',
-        'Needs Review': 'bg-gray-50/30',
-        'Not Interested': 'bg-red-50/50'
+        'Highly Interested': 'bg-blue-50/50',
+        'MND': 'bg-purple-50/50',
+        'Ongoing Project': 'bg-teal-50/50',
+        'Send Portfolio': 'bg-orange-50/50',
+        'Callback': 'bg-yellow-50/50'
     };
     return colors[category] || '';
 };
@@ -96,11 +91,10 @@ export default function AllLeads() {
     // Filter states
     const [search, setSearch] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('');
+    const [typeFilter, setTypeFilter] = useState('');
+    const [vendorTypeFilter, setVendorTypeFilter] = useState('');
     const [priorityFilter, setPriorityFilter] = useState('');
-    const [assignedToFilter, setAssignedToFilter] = useState('');
     const [cityFilter, setCityFilter] = useState('');
-    const [sourceFilter, setSourceFilter] = useState('');
-    const [portfolioSentFilter, setPortfolioSentFilter] = useState('');
     const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
     const [chattingViaFilter, setChattingViaFilter] = useState('');
     
@@ -122,6 +116,7 @@ export default function AllLeads() {
     const [callLogLead, setCallLogLead] = useState(null);
     const [importModalOpen, setImportModalOpen] = useState(false);
     const [addLeadModalOpen, setAddLeadModalOpen] = useState(false);
+    const [callbackModalLead, setCallbackModalLead] = useState(null);
     
     // Inline editing
     const [editingCell, setEditingCell] = useState(null);
@@ -154,11 +149,10 @@ export default function AllLeads() {
             setLoading(true);
             const params = new URLSearchParams();
             if (categoryFilter) params.append('category', categoryFilter);
+            if (typeFilter) params.append('type', typeFilter);
+            if (vendorTypeFilter) params.append('vendorType', vendorTypeFilter);
             if (priorityFilter) params.append('priority', priorityFilter);
-            if (assignedToFilter) params.append('assignedTo', assignedToFilter);
             if (cityFilter) params.append('city', cityFilter);
-            if (sourceFilter) params.append('source', sourceFilter);
-            if (portfolioSentFilter) params.append('portfolioSent', portfolioSentFilter === 'yes');
             if (showDuplicatesOnly) params.append('showDuplicatesOnly', 'true');
             if (chattingViaFilter) params.append('chattingVia', chattingViaFilter);
             if (search) params.append('search', search);
@@ -181,7 +175,7 @@ export default function AllLeads() {
         } finally {
             setLoading(false);
         }
-    }, [categoryFilter, priorityFilter, assignedToFilter, cityFilter, sourceFilter, portfolioSentFilter, showDuplicatesOnly, chattingViaFilter, search, sortField, sortDirection, sortField2, sortDirection2, page, pageSize]);
+    }, [categoryFilter, typeFilter, vendorTypeFilter, priorityFilter, cityFilter, showDuplicatesOnly, chattingViaFilter, search, sortField, sortDirection, sortField2, sortDirection2, page, pageSize]);
 
     useEffect(() => {
         fetchLeads();
@@ -323,18 +317,17 @@ export default function AllLeads() {
     // Clear filters
     const clearFilters = () => {
         setCategoryFilter('');
+        setTypeFilter('');
+        setVendorTypeFilter('');
         setPriorityFilter('');
-        setAssignedToFilter('');
         setCityFilter('');
-        setSourceFilter('');
-        setPortfolioSentFilter('');
         setShowDuplicatesOnly(false);
         setChattingViaFilter('');
         setSearch('');
         setPage(0);
     };
 
-    const hasFilters = categoryFilter || priorityFilter || assignedToFilter || cityFilter || sourceFilter || portfolioSentFilter || showDuplicatesOnly || chattingViaFilter || search;
+    const hasFilters = categoryFilter || typeFilter || vendorTypeFilter || priorityFilter || cityFilter || showDuplicatesOnly || chattingViaFilter || search;
 
     const SortIcon = ({ field }) => {
         const isActive = sortField === field;
@@ -398,18 +391,18 @@ export default function AllLeads() {
                 <LeadFilterBar
                     search={search}
                     onSearchChange={handleSearchChange}
+                    typeFilter={typeFilter}
+                    onTypeChange={(v) => { setTypeFilter(v); setPage(0); }}
+                    vendorTypeFilter={vendorTypeFilter}
+                    onVendorTypeChange={(v) => { setVendorTypeFilter(v); setPage(0); }}
                     categoryFilter={categoryFilter}
-                    onCategoryChange={setCategoryFilter}
+                    onCategoryChange={(v) => { setCategoryFilter(v); setPage(0); }}
                     priorityFilter={priorityFilter}
-                    onPriorityChange={setPriorityFilter}
-                    assignedToFilter={assignedToFilter}
-                    onAssignedToChange={setAssignedToFilter}
+                    onPriorityChange={(v) => { setPriorityFilter(v); setPage(0); }}
                     cityFilter={cityFilter}
-                    onCityChange={setCityFilter}
-                    portfolioSentFilter={portfolioSentFilter}
-                    onPortfolioSentChange={setPortfolioSentFilter}
+                    onCityChange={(v) => { setCityFilter(v); setPage(0); }}
                     showDuplicatesOnly={showDuplicatesOnly}
-                    onDuplicatesChange={setShowDuplicatesOnly}
+                    onDuplicatesChange={(v) => { setShowDuplicatesOnly(v); setPage(0); }}
                     chattingViaFilter={chattingViaFilter}
                     onChattingViaChange={(v) => { setChattingViaFilter(v); setPage(0); }}
                     hasFilters={hasFilters}
@@ -474,18 +467,23 @@ export default function AllLeads() {
                                 >
                                     <span className="flex items-center">Company <SortIcon field="companyName" /></span>
                                 </th>
+                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[90px]">Vendor Type</th>
+                                <th className="px-2 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[60px]">Profile</th>
                                 <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[90px]">Phone</th>
                                 <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[90px]">Phone 2</th>
-                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[90px]">WhatsApp</th>
-                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[80px]">Instagram</th>
-                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[120px]">Email</th>
                                 <th 
                                     className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[70px]"
                                     onClick={(e) => handleSort('city', e)}
                                 >
                                     <span className="flex items-center">City <SortIcon field="city" /></span>
                                 </th>
-                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[80px]">Response</th>
+                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[150px]">Last Update</th>
+                                <th 
+                                    className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[70px]"
+                                    onClick={(e) => handleSort('type', e)}
+                                >
+                                    <span className="flex items-center">Type <SortIcon field="type" /></span>
+                                </th>
                                 <th 
                                     className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[90px]"
                                     onClick={(e) => handleSort('categoryRank', e)}
@@ -494,31 +492,17 @@ export default function AllLeads() {
                                 </th>
                                 <th 
                                     className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[80px]"
-                                    onClick={(e) => handleSort('assignedTo', e)}
+                                    onClick={(e) => handleSort('followUpDate', e)}
                                 >
-                                    <span className="flex items-center">Assigned <SortIcon field="assignedTo" /></span>
+                                    <span className="flex items-center">Follow-up <SortIcon field="followUpDate" /></span>
                                 </th>
-                                <th 
-                                    className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[80px]"
-                                    onClick={(e) => handleSort('nextFollowupDate', e)}
-                                >
-                                    <span className="flex items-center">Follow-up <SortIcon field="nextFollowupDate" /></span>
-                                </th>
-                                <th className="px-2 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase tracking-wider w-12">Port.</th>
-                                <th className="px-2 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase tracking-wider w-12">Price</th>
                                 <th 
                                     className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[60px]"
                                     onClick={(e) => handleSort('priorityRank', e)}
                                 >
                                     <span className="flex items-center">Priority <SortIcon field="priorityRank" /></span>
                                 </th>
-                                <th 
-                                    className="px-2 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-12"
-                                    onClick={(e) => handleSort('callCount', e)}
-                                >
-                                    <span className="flex items-center justify-center">Calls <SortIcon field="callCount" /></span>
-                                </th>
-                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[60px]">Source</th>
+                                <th className="px-2 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider min-w-[100px]">Business No.</th>
                                 <th className="px-2 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase tracking-wider w-20">Actions</th>
                             </tr>
                         </thead>
@@ -572,6 +556,14 @@ export default function AllLeads() {
                                                     )}
                                                 </div>
                                             </td>
+                                            <td className="px-2 py-1 text-gray-600 truncate max-w-[100px]">{lead.vendorType || '-'}</td>
+                                            <td className="px-2 py-1 text-center">
+                                                {lead.profileUrl ? (
+                                                    <a href={lead.profileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center text-blue-500 hover:text-blue-700">
+                                                        <ExternalLink size={14} />
+                                                    </a>
+                                                ) : <span className="text-gray-300">-</span>}
+                                            </td>
                                             <td className="px-2 py-1">
                                                 {lead.phone && (
                                                     <a href={`tel:${lead.phone}`} className="text-gray-600 hover:text-[#E8536A]">
@@ -580,66 +572,238 @@ export default function AllLeads() {
                                                 )}
                                             </td>
                                             <td className="px-2 py-1 text-gray-600">{lead.phone2 || '-'}</td>
-                                            <td className="px-2 py-1">
-                                                {lead.whatsapp && (
-                                                    <a href={`https://wa.me/${lead.whatsapp}`} target="_blank" rel="noreferrer" className="text-green-600 hover:underline">
-                                                        {lead.whatsapp}
-                                                    </a>
-                                                )}
-                                            </td>
-                                            <td className="px-2 py-1">
-                                                {lead.instagram && (
-                                                    <a href={`https://instagram.com/${lead.instagram}`} target="_blank" rel="noreferrer" className="text-purple-600 hover:underline">
-                                                        @{lead.instagram}
-                                                    </a>
-                                                )}
-                                            </td>
-                                            <td className="px-2 py-1 text-gray-600 truncate max-w-[100px]">{lead.email || '-'}</td>
                                             <td className="px-2 py-1 text-gray-600">{lead.city || '-'}</td>
                                             <td className="px-2 py-1">
-                                                {lead.mostCommonResponse && (
-                                                    <span className="text-[10px] text-gray-600">{lead.mostCommonResponse}</span>
+                                                {editingCell?.leadId === (lead.id || lead._id) && editingCell?.field === 'lastUpdate' ? (
+                                                    <div className="flex flex-col gap-1">
+                                                        <input 
+                                                            type="text"
+                                                            className="w-full text-[10px] border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-[#E8536A] focus:ring-1 focus:ring-[#E8536A]"
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={e => setEditValue(e.target.value)}
+                                                            onBlur={async () => {
+                                                                const prevLeads = [...leads];
+                                                                const leadId = lead.id || lead._id;
+                                                                console.log("Saving lastUpdate:", editValue, "for lead:", leadId);
+                                                                try {
+                                                                    setLeads(prev => prev.map(l => (l.id || l._id) === leadId ? { ...l, lastUpdate: editValue, lastUpdateDate: new Date().toISOString() } : l));
+                                                                    await axios.patch(`${API_URL}/api/leads/${leadId}`, { lastUpdate: editValue }, { withCredentials: true });
+                                                                } catch(e) {
+                                                                    console.error(e);
+                                                                    setLeads(prevLeads);
+                                                                }
+                                                                setEditingCell(null);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.target.blur();
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <div 
+                                                        className="cursor-pointer hover:bg-gray-50 min-h-[24px] p-1 rounded group flex flex-col"
+                                                        onClick={() => startEdit(lead.id || lead._id, 'lastUpdate', lead.lastUpdate || '')}
+                                                    >
+                                                        {lead.lastUpdate ? (
+                                                            <>
+                                                                <span className="text-[11px] text-gray-700 leading-tight truncate max-w-[150px]">{lead.lastUpdate}</span>
+                                                                <span className="text-[9px] text-gray-400 mt-0.5">
+                                                                    {lead.lastUpdateDate ? new Date(lead.lastUpdateDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <span className="text-[10px] text-gray-400 italic">Add note...</span>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="px-2 py-1">
-                                                <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getCategoryStyle(lead.category)}`}>
-                                                    {lead.category}
-                                                </span>
+                                                {editingCell?.leadId === lead.id && editingCell?.field === 'type' ? (
+                                                    <Select
+                                                        value={editValue}
+                                                        onValueChange={async (val) => {
+                                                            setEditValue(val);
+                                                            const prevLeads = [...leads];
+                                                            try {
+                                                                setLeads(prev => prev.map(l => {
+                                                                    if (l.id === lead.id) {
+                                                                        const updatedLead = { ...l, type: val };
+                                                                        if (val === 'No' || val === 'NA') {
+                                                                            updatedLead.category = null;
+                                                                        }
+                                                                        return updatedLead;
+                                                                    }
+                                                                    return l;
+                                                                }));
+                                                                await axios.patch(`${API_URL}/api/leads/${lead.id}`, { type: val }, { withCredentials: true });
+                                                            } catch (err) {
+                                                                console.error(err);
+                                                                setLeads(prevLeads);
+                                                            }
+                                                            setEditingCell(null);
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="h-6 w-full text-[10px] p-1">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Yes">Yes</SelectItem>
+                                                            <SelectItem value="No">No</SelectItem>
+                                                            <SelectItem value="NA">NA</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <div
+                                                        onClick={() => startEdit(lead.id, 'type', lead.type || 'NA')}
+                                                        className="cursor-pointer hover:bg-gray-100 rounded px-1 py-0.5"
+                                                    >
+                                                        {lead.type === 'Yes' && <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-green-100 text-green-700 border-green-300">Yes</Badge>}
+                                                        {lead.type === 'No' && <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-red-100 text-red-700 border-red-300">No</Badge>}
+                                                        {(lead.type === 'NA' || !lead.type) && <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-gray-100 text-gray-600 border-gray-300">NA</Badge>}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="px-2 py-1">
-                                                {assignedMember && (
-                                                    <span 
-                                                        className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium text-white"
-                                                        style={{ backgroundColor: assignedMember.color }}
+                                                {lead.type !== 'Yes' ? (
+                                                    <span className="text-gray-400 text-[10px]">—</span>
+                                                ) : editingCell?.leadId === lead.id && editingCell?.field === 'category' ? (
+                                                    <Select
+                                                        value={editValue}
+                                                        onValueChange={async (val) => {
+                                                            setEditValue(val);
+                                                            if (val === 'Callback') {
+                                                                setCallbackModalLead(lead);
+                                                                setEditingCell(null);
+                                                                return;
+                                                            }
+                                                            const prevLeads = [...leads];
+                                                            try {
+                                                                setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, category: val } : l));
+                                                                await axios.patch(`${API_URL}/api/leads/${lead.id}`, { category: val }, { withCredentials: true });
+                                                            } catch (err) {
+                                                                console.error(err);
+                                                                setLeads(prevLeads);
+                                                            }
+                                                            setEditingCell(null);
+                                                        }}
                                                     >
-                                                        {assignedMember.name.split(' ')[0]}
-                                                    </span>
+                                                        <SelectTrigger className="h-6 w-full text-[10px] p-1">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {CATEGORIES.map(cat => (
+                                                                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <div
+                                                        onClick={() => startEdit(lead.id, 'category', lead.category || '')}
+                                                        className="cursor-pointer hover:bg-gray-100 rounded px-1 py-0.5 min-w-[70px] min-h-[16px]"
+                                                    >
+                                                        {lead.category ? (
+                                                            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getCategoryStyle(lead.category)}`}>
+                                                                {lead.category}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-[10px]">—</span>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="px-2 py-1 text-gray-600">
-                                                {lead.nextFollowupDate ? new Date(lead.nextFollowupDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}
-                                            </td>
-                                            <td className="px-2 py-1 text-center">
-                                                {lead.portfolioSent ? <Check size={12} className="mx-auto text-green-600" /> : <span className="text-gray-300">-</span>}
-                                            </td>
-                                            <td className="px-2 py-1 text-center">
-                                                {lead.priceListSent ? <Check size={12} className="mx-auto text-green-600" /> : <span className="text-gray-300">-</span>}
+                                                {lead.followUpDate ? new Date(lead.followUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}
                                             </td>
                                             <td className="px-2 py-1">
-                                                <span className={`font-medium ${getPriorityColor(lead.priority)}`}>
-                                                    {lead.priority}
-                                                </span>
+                                                {editingCell?.leadId === lead.id && editingCell?.field === 'priority' ? (
+                                                    <Select
+                                                        value={editValue}
+                                                        onValueChange={async (val) => {
+                                                            setEditValue(val);
+                                                            const prevLeads = [...leads];
+                                                            try {
+                                                                setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, priority: val } : l));
+                                                                await axios.patch(`${API_URL}/api/leads/${lead.id}`, { priority: val }, { withCredentials: true });
+                                                            } catch (err) {
+                                                                console.error(err);
+                                                                setLeads(prevLeads);
+                                                            }
+                                                            setEditingCell(null);
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="h-6 w-full text-[10px] p-1">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="High">High</SelectItem>
+                                                            <SelectItem value="Medium">Medium</SelectItem>
+                                                            <SelectItem value="Low">Low</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <div
+                                                        onClick={() => startEdit(lead.id, 'priority', lead.priority || 'Low')}
+                                                        className="cursor-pointer hover:bg-gray-100 rounded px-1 py-0.5"
+                                                    >
+                                                        <span className={`font-medium ${getPriorityColor(lead.priority)}`}>
+                                                            {lead.priority || 'Low'}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </td>
-                                            <td className="px-2 py-1 text-center">
-                                                <button
-                                                    onClick={() => setCallLogLead(lead)}
-                                                    className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold hover:bg-blue-200 transition-colors"
-                                                    data-testid={`call-log-btn-${lead.id}`}
-                                                >
-                                                    {lead.callCount || 0}
-                                                </button>
+                                            <td className="px-2 py-1">
+                                                {editingCell?.leadId === (lead.id || lead._id) && editingCell?.field === 'chattingVia' ? (
+                                                    <Select
+                                                        value={editValue || "clear"}
+                                                        onValueChange={async (val) => {
+                                                            const newValue = val === "clear" ? "" : val;
+                                                            setEditValue(newValue);
+                                                            const prevLeads = [...leads];
+                                                            const leadId = lead.id || lead._id;
+                                                            console.log("Saving chattingVia:", newValue, "for lead:", leadId);
+                                                            try {
+                                                                setLeads(prev => prev.map(l => (l.id || l._id) === leadId ? { ...l, chattingVia: newValue } : l));
+                                                                await axios.patch(`${API_URL}/api/leads/${leadId}`, { chattingVia: newValue }, { withCredentials: true });
+                                                            } catch (err) {
+                                                                console.error(err);
+                                                                setLeads(prevLeads);
+                                                            }
+                                                            setEditingCell(null);
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="h-6 w-[100px] text-[10px] p-1">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="clear">Clear</SelectItem>
+                                                            <SelectItem value="+91XXXXX5235">+91XXXXX5235</SelectItem>
+                                                            <SelectItem value="+91XXXXX5533">+91XXXXX5533</SelectItem>
+                                                            <SelectItem value="+91XXXXX0951">+91XXXXX0951</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <div
+                                                        onClick={() => startEdit(lead.id || lead._id, 'chattingVia', lead.chattingVia || 'clear')}
+                                                        className="cursor-pointer hover:bg-gray-100 rounded px-1 py-0.5 inline-block"
+                                                    >
+                                                        {lead.chattingVia ? (
+                                                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+                                                                lead.chattingVia.endsWith('5235') ? 'bg-blue-100 text-blue-700 border-blue-300' :
+                                                                lead.chattingVia.endsWith('5533') ? 'bg-purple-100 text-purple-700 border-purple-300' :
+                                                                lead.chattingVia.endsWith('0951') ? 'bg-green-100 text-green-700 border-green-300' :
+                                                                'bg-gray-100 text-gray-600 border-gray-300'
+                                                            }`}>
+                                                                {lead.chattingVia.slice(-4)}
+                                                            </Badge>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-[10px]">—</span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </td>
-                                            <td className="px-2 py-1 text-gray-500 truncate max-w-[60px]">{lead.sourceSheet || '-'}</td>
                                             <td className="px-2 py-1">
                                                 <div className="flex items-center justify-center gap-1">
                                                     <button
@@ -731,6 +895,19 @@ export default function AllLeads() {
                 onClose={() => setAddLeadModalOpen(false)}
                 onSuccess={() => { setAddLeadModalOpen(false); fetchLeads(); }}
                 teamMembers={teamMembers}
+            />
+
+            <CallbackSchedulerModal
+                isOpen={!!callbackModalLead}
+                onClose={() => setCallbackModalLead(null)}
+                lead={callbackModalLead}
+                onScheduled={() => {
+                    setLeads(prev => prev.map(l => l.id === callbackModalLead.id ? { ...l, category: "Callback" } : l));
+                    fetchLeads();
+                }}
+                onSkip={() => {
+                    setLeads(prev => prev.map(l => l.id === callbackModalLead.id ? { ...l, category: "Callback" } : l));
+                }}
             />
         </div>
     );

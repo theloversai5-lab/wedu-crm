@@ -51,7 +51,7 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
     const [response, setResponse] = useState('');
     const [notes, setNotes] = useState('');
     const [duration, setDuration] = useState('');
-    const [nextFollowupDate, setNextFollowupDate] = useState('');
+    const [followUpDate, setFollowUpDate] = useState('');
     const [nextFollowupTime, setNextFollowupTime] = useState('');
     const [portfolioSent, setPortfolioSent] = useState(false);
     const [priceListSent, setPriceListSent] = useState(false);
@@ -77,17 +77,17 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
         setLoading(true);
         try {
             let followupDateTime = null;
-            if (nextFollowupDate) {
+            if (followUpDate) {
                 followupDateTime = nextFollowupTime 
-                    ? `${nextFollowupDate}T${nextFollowupTime}:00`
-                    : `${nextFollowupDate}T10:00:00`;
+                    ? `${followUpDate}T${nextFollowupTime}:00`
+                    : `${followUpDate}T10:00:00`;
             }
 
             await axios.post(`${API_URL}/api/leads/${lead.id}/response`, {
                 response,
                 notes,
                 duration: duration ? parseInt(duration) : null,
-                nextFollowupDate: followupDateTime,
+                followUpDate: followupDateTime,
                 portfolioSent,
                 priceListSent,
                 waSent,
@@ -98,7 +98,7 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
             setResponse('');
             setNotes('');
             setDuration('');
-            setNextFollowupDate('');
+            setFollowUpDate('');
             setNextFollowupTime('');
             setPortfolioSent(false);
             setPriceListSent(false);
@@ -231,11 +231,11 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="space-y-2">
-                                    <Label className="text-[11px]">Next Follow-up Date</Label>
+                                    <Label className="text-[11px]">Follow-up Date</Label>
                                     <Input
                                         type="date"
-                                        value={nextFollowupDate}
-                                        onChange={(e) => setNextFollowupDate(e.target.value)}
+                                        value={followUpDate}
+                                        onChange={(e) => setFollowUpDate(e.target.value)}
                                         className="h-9 text-[12px] rounded-[8px]"
                                         data-testid="followup-date-input"
                                     />
@@ -322,11 +322,10 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
                                             {entry.priceListSent && <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Price List</span>}
                                             {entry.waSent && <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">WA Sent</span>}
                                         </div>
-                                        {entry.nextFollowupDate && (
-                                            <div className="text-[10px] text-[#E8536A] flex items-center gap-1">
-                                                <Calendar size={10} />
-                                                Next: {new Date(entry.nextFollowupDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                                            </div>
+                                        {entry.followUpDate && (
+                                            <span className="text-[11px] text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
+                                                Next: {new Date(entry.followUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                            </span>
                                         )}
                                     </div>
                                 );

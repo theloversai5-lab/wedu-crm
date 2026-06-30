@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
-import { Settings as SettingsIcon, User, Lock, Shield, Check, Loader2 } from 'lucide-react';
+import { Settings as SettingsIcon, User, Lock, Shield, Check, Loader2, Calendar } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
@@ -30,6 +30,10 @@ export default function Settings() {
     const [dupDetection, setDupDetection] = useState(true);
     const [settingsLoading, setSettingsLoading] = useState(false);
 
+    // Integrations
+    const [googleConnected, setGoogleConnected] = useState(false);
+    const [googleLoading, setGoogleLoading] = useState(false);
+
     useEffect(() => {
         if (user) {
             setName(user.name || '');
@@ -47,7 +51,29 @@ export default function Settings() {
                 console.error('Failed to load settings');
             }
         };
+
+        const fetchGoogleStatus = async () => {
+            try {
+                const res = await axios.get(`${API_URL}/api/auth/google/status`, { withCredentials: true });
+                setGoogleConnected(res.data.connected);
+            } catch (e) {
+                console.error('Failed to load google status');
+            }
+        };
+
         fetchSettings();
+        fetchGoogleStatus();
+
+        // Check for success param
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('google') === 'connected') {
+            toast.success('✓ Google Calendar connected successfully!');
+            // Remove param from url without reloading
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (urlParams.get('google') === 'error') {
+            toast.error('Failed to connect Google Calendar.');
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
     }, []);
 
     const handleProfileSave = async () => {
@@ -108,6 +134,29 @@ export default function Settings() {
             toast.error(err.response?.data?.detail || 'Failed to update settings');
         }
         setSettingsLoading(false);
+    };
+
+    const handleGoogleConnect = async () => {
+        setGoogleLoading(true);
+        try {
+            const res = await axios.get(`${API_URL}/api/auth/google`, { withCredentials: true });
+            window.location.href = res.data.url;
+        } catch (err) {
+            toast.error('Failed to start Google Calendar connection');
+            setGoogleLoading(false);
+        }
+    };
+
+    const handleGoogleDisconnect = async () => {
+        setGoogleLoading(true);
+        try {
+            await axios.delete(`${API_URL}/api/auth/google/disconnect`, { withCredentials: true });
+            setGoogleConnected(false);
+            toast.success('Google Calendar disconnected');
+        } catch (err) {
+            toast.error('Failed to disconnect Google Calendar');
+        }
+        setGoogleLoading(false);
     };
 
     return (
@@ -230,6 +279,50 @@ export default function Settings() {
                     </div>
                 </Section>
             )}
+
+            {/* Integrations */}
+            <Section icon={Calendar} title="Integrations">
+                <div className="flex items-center justify-between py-2">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
+                            <Calendar size={18} className="text-[#4285F4]" />
+                        </div>
+                        <div>
+                            <h3 className="text-[13px] font-medium text-gray-800 flex items-center gap-2">
+                                Google Calendar
+                                {googleConnected && <Check size={14} className="text-green-500" />}
+                            </h3>
+                            <p className="text-[11px] text-gray-500">
+                                {googleConnected
+                                    ? 'Callbacks will automatically appear in your Google Calendar.'
+                                    : 'Sync your callback schedules directly to Google Calendar. Get notified before every call.'}
+                            </p>
+                        </div>
+                    </div>
+                    <div>
+                        {googleConnected ? (
+                            <Button
+                                onClick={handleGoogleDisconnect}
+                                disabled={googleLoading}
+                                variant="outline"
+                                className="h-8 text-[12px] text-red-500 border-red-200 hover:bg-red-50 hover:text-red-600 rounded-[8px]"
+                            >
+                                {googleLoading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
+                                Disconnect
+                            </Button>
+                        ) : (
+                            <Button
+                                onClick={handleGoogleConnect}
+                                disabled={googleLoading}
+                                className="h-8 text-[12px] bg-[#4285F4] hover:bg-blue-600 text-white rounded-[8px]"
+                            >
+                                {googleLoading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
+                                Connect Google Calendar
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            </Section>
 
             {/* Account Info */}
             <div className="bg-gray-50 rounded-[12px] p-4 text-[11px] text-gray-500 space-y-1">

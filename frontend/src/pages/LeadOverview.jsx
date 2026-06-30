@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import axios from 'axios';
 import { 
     ArrowLeft, Phone, Mail, Instagram, MessageCircle, 
     Calendar, Clock, Edit2, Trash2, Check, X, ExternalLink,
-    Send, User, AlertTriangle
+    Send, User, AlertTriangle, Globe
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -38,6 +38,7 @@ import {
     AlertDialogTrigger,
 } from '../components/ui/alert-dialog';
 import CallLogPanel from '../components/CallLogPanel';
+import CallbackSchedulerModal from '../components/CallbackSchedulerModal';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
@@ -48,18 +49,11 @@ const WA_NUMBERS = [
 ];
 
 const CATEGORIES = [
-    'Meeting Done', 'Interested', 'Call Back', 'Busy', 'No Response',
-    'Foreign', 'Future Projection', 'Needs Review', 'Not Interested'
+    'Meeting Done', 'Highly Interested', 'MND', 'Ongoing Project',
+    'Send Portfolio', 'Callback'
 ];
 
-const PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Review', 'Archive'];
-
-const PIPELINE_STAGES = [
-    "New Contact", "Interested", "Send Portfolio", "Time Given",
-    "Meeting Scheduled", "Meeting Done", "Project Follow-up", "Onboarded",
-    "Unknown", "Call Again 1", "Call Again 2", "Call Again 3",
-    "Not Answering", "Not Interested"
-];
+const PRIORITIES = ['High', 'Medium', 'Low'];
 
 const getCategoryStyle = (category) => {
     const styles = {
@@ -97,10 +91,10 @@ export default function LeadOverview() {
     const [loading, setLoading] = useState(true);
     const [teamMembers, setTeamMembers] = useState([]);
     const [showCallLog, setShowCallLog] = useState(false);
-    const [editModalOpen, setEditModalOpen] = useState(false);
-    const [editingField, setEditingField] = useState(null);
-    const [editValue, setEditValue] = useState('');
-    const [saving, setSaving] = useState(false);
+    
+    // Callback Modal state
+    const [callbackModalOpen, setCallbackModalOpen] = useState(false);
+    const debounceTimers = useRef({});
 
     const fetchLead = useCallback(async () => {
         try {
@@ -133,16 +127,28 @@ export default function LeadOverview() {
     }, []);
 
     const handleInlineEdit = async (field, value) => {
-        setSaving(true);
+        if (field === 'category' && value === 'Callback') {
+            setCallbackModalOpen(true);
+            return;
+        }
         try {
             await axios.patch(`${API_URL}/api/leads/${id}`, { [field]: value }, { withCredentials: true });
-            await fetchLead();
-            setEditingField(null);
+            setLead(prev => ({ ...prev, [field]: value }));
         } catch (err) {
             console.error('Edit error:', err);
-        } finally {
-            setSaving(false);
         }
+    };
+
+    const handleDebouncedEdit = (field, value) => {
+        setLead(prev => ({ ...prev, [field]: value }));
+        if (debounceTimers.current[field]) clearTimeout(debounceTimers.current[field]);
+        debounceTimers.current[field] = setTimeout(async () => {
+            try {
+                await axios.patch(`${API_URL}/api/leads/${id}`, { [field]: value }, { withCredentials: true });
+            } catch (err) {
+                console.error('Debounced edit error:', err);
+            }
+        }, 800);
     };
 
     const handleDelete = async () => {
@@ -152,20 +158,6 @@ export default function LeadOverview() {
         } catch (err) {
             console.error('Delete error:', err);
         }
-    };
-
-    const startEdit = (field, currentValue) => {
-        setEditingField(field);
-        setEditValue(currentValue || '');
-    };
-
-    const cancelEdit = () => {
-        setEditingField(null);
-        setEditValue('');
-    };
-
-    const saveEdit = () => {
-        handleInlineEdit(editingField, editValue);
     };
 
     if (loading) {
@@ -189,38 +181,7 @@ export default function LeadOverview() {
         ? Math.floor((Date.now() - new Date(lead.lastContactDate).getTime()) / (1000 * 60 * 60 * 24))
         : null;
 
-    const InlineEditField = ({ field, value, label, type = 'text' }) => {
-        if (editingField === field) {
-            return (
-                <div className="flex items-center gap-2">
-                    <Input
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        type={type}
-                        className="h-8 text-[12px] w-full max-w-[200px]"
-                        autoFocus
-                    />
-                    <button onClick={saveEdit} className="p-1 text-green-600 hover:bg-green-50 rounded" disabled={saving}>
-                        <Check size={14} />
-                    </button>
-                    <button onClick={cancelEdit} className="p-1 text-gray-400 hover:bg-gray-50 rounded">
-                        <X size={14} />
-                    </button>
-                </div>
-            );
-        }
-        return (
-            <div className="flex items-center gap-2 group">
-                <span className="text-[13px] text-gray-900">{value || '-'}</span>
-                <button 
-                    onClick={() => startEdit(field, value)}
-                    className="p-1 text-gray-300 hover:text-[#E8536A] opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                    <Edit2 size={12} />
-                </button>
-            </div>
-        );
-    };
+
 
     return (
         <div className="space-y-6 animate-fade-in" data-testid="lead-overview-page">
@@ -248,41 +209,23 @@ export default function LeadOverview() {
                         )}
                     </div>
                     <div className="flex items-center gap-3 mt-2 flex-wrap">
-                        <span className={`px-2 py-1 rounded text-[11px] font-medium border ${getCategoryStyle(lead.category)}`}>
-                            {lead.category}
-                        </span>
-                        <span className="flex items-center gap-1.5 text-[12px]">
-                            <span className={`w-2 h-2 rounded-full ${getPriorityDot(lead.priority)}`} />
-                            {lead.priority}
-                        </span>
-                        <span className="text-[12px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                            {lead.pipelineStage}
-                        </span>
-                        {assignedMember && (
-                            <span 
-                                className="text-[11px] px-2 py-0.5 rounded text-white"
-                                style={{ backgroundColor: assignedMember.color }}
-                            >
-                                {assignedMember.name}
+                        {lead.category && (
+                            <span className={`px-2 py-1 rounded text-[11px] font-medium border ${getCategoryStyle(lead.category)}`}>
+                                {lead.category}
                             </span>
                         )}
-                        {lastContactDays !== null && (
-                            <span className="text-[11px] text-gray-400">
-                                Last contacted {lastContactDays === 0 ? 'today' : `${lastContactDays} days ago`}
+                        <span className="flex items-center gap-1.5 text-[12px]">
+                            <span className={`w-2 h-2 rounded-full ${getPriorityDot(lead.priority)}`} />
+                            {lead.priority || 'Low'}
+                        </span>
+                        {lead.vendorType && (
+                            <span className="text-[12px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                                {lead.vendorType}
                             </span>
                         )}
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Button
-                        onClick={() => setEditModalOpen(true)}
-                        variant="outline"
-                        className="h-9 text-[12px] rounded-[8px]"
-                        data-testid="edit-lead-btn"
-                    >
-                        <Edit2 size={14} className="mr-1.5" />
-                        Edit
-                    </Button>
                     {isAdmin && (
                         <AlertDialog>
                             <AlertDialogTrigger asChild>
@@ -322,158 +265,121 @@ export default function LeadOverview() {
                         <h2 className="font-heading text-sm font-medium text-gray-900 mb-4">Contact Details</h2>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                             <div>
+                                <Label className="text-[10px] text-gray-400 uppercase">Company Name</Label>
+                                <Input value={lead.companyName || ''} onChange={(e) => handleDebouncedEdit('companyName', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                            </div>
+                            <div>
+                                <Label className="text-[10px] text-gray-400 uppercase">Person Name</Label>
+                                <Input value={lead.personName || ''} onChange={(e) => handleDebouncedEdit('personName', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                            </div>
+                            <div>
                                 <Label className="text-[10px] text-gray-400 uppercase">Phone</Label>
-                                {lead.phone ? (
-                                    <a href={`tel:${lead.phone}`} className="text-[13px] text-[#E8536A] hover:underline flex items-center gap-1">
-                                        <Phone size={12} />
-                                        {lead.phone}
-                                    </a>
-                                ) : (
-                                    <span className="text-[13px] text-gray-400">-</span>
-                                )}
+                                <Input value={lead.phone || ''} onChange={(e) => handleDebouncedEdit('phone', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                                {lead.phone && <a href={`tel:${lead.phone}`} className="text-[10px] text-[#E8536A] hover:underline flex items-center gap-0.5 mt-0.5"><Phone size={10} /> Call</a>}
                             </div>
                             <div>
                                 <Label className="text-[10px] text-gray-400 uppercase">Phone 2</Label>
-                                {lead.phone2 ? (
-                                    <a href={`tel:${lead.phone2}`} className="text-[13px] text-[#E8536A] hover:underline flex items-center gap-1">
-                                        <Phone size={12} />
-                                        {lead.phone2}
-                                    </a>
-                                ) : (
-                                    <span className="text-[13px] text-gray-400">-</span>
-                                )}
+                                <Input value={lead.phone2 || ''} onChange={(e) => handleDebouncedEdit('phone2', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
                             </div>
                             <div>
                                 <Label className="text-[10px] text-gray-400 uppercase">Email</Label>
-                                {lead.email ? (
-                                    <a href={`mailto:${lead.email}`} className="text-[13px] text-blue-600 hover:underline flex items-center gap-1">
-                                        <Mail size={12} />
-                                        {lead.email}
-                                    </a>
-                                ) : (
-                                    <span className="text-[13px] text-gray-400">-</span>
-                                )}
+                                <Input value={lead.email || ''} onChange={(e) => handleDebouncedEdit('email', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                                {lead.email && <a href={`mailto:${lead.email}`} className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5 mt-0.5"><Mail size={10} /> Send Email</a>}
                             </div>
                             <div>
-                                <div className="flex items-center gap-1">
-                                    <Label className="text-[10px] text-gray-400 uppercase">WhatsApp 1</Label>
-                                    {lead.primaryWhatsapp === 1 && (
-                                        <Badge className="text-[8px] bg-green-100 text-green-700 px-1 py-0">Primary</Badge>
-                                    )}
-                                </div>
-                                {lead.whatsapp ? (
-                                    <span className="text-[13px] text-gray-900">{lead.whatsapp}</span>
-                                ) : (
-                                    <span className="text-[13px] text-gray-400">-</span>
-                                )}
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-1">
-                                    <Label className="text-[10px] text-gray-400 uppercase">WhatsApp 2</Label>
-                                    {lead.primaryWhatsapp === 2 && (
-                                        <Badge className="text-[8px] bg-green-100 text-green-700 px-1 py-0">Primary</Badge>
-                                    )}
-                                </div>
-                                {lead.whatsapp2 ? (
-                                    <span className="text-[13px] text-gray-900">{lead.whatsapp2}</span>
-                                ) : (
-                                    <span className="text-[13px] text-gray-400">-</span>
-                                )}
+                                <Label className="text-[10px] text-gray-400 uppercase">WhatsApp</Label>
+                                <Input value={lead.whatsapp || ''} onChange={(e) => handleDebouncedEdit('whatsapp', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                                {lead.whatsapp && <a href={`https://wa.me/${lead.whatsapp}`} target="_blank" rel="noreferrer" className="text-[10px] text-green-600 hover:underline flex items-center gap-0.5 mt-0.5"><MessageCircle size={10} /> Open WhatsApp</a>}
                             </div>
                             <div>
                                 <Label className="text-[10px] text-gray-400 uppercase">Instagram</Label>
-                                {lead.instagram ? (
-                                    <a 
-                                        href={`https://instagram.com/${lead.instagram}`} 
-                                        target="_blank" 
-                                        rel="noreferrer"
-                                        className="text-[13px] text-purple-600 hover:underline flex items-center gap-1"
-                                    >
-                                        <Instagram size={12} />
-                                        @{lead.instagram}
-                                        <ExternalLink size={10} />
-                                    </a>
-                                ) : (
-                                    <span className="text-[13px] text-gray-400">-</span>
-                                )}
+                                <Input value={lead.instagram || ''} onChange={(e) => handleDebouncedEdit('instagram', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                                {lead.instagram && <a href={`https://instagram.com/${lead.instagram}`} target="_blank" rel="noreferrer" className="text-[10px] text-purple-600 hover:underline flex items-center gap-0.5 mt-0.5"><Instagram size={10} /> @{lead.instagram} <ExternalLink size={8} /></a>}
                             </div>
-                        </div>
-
-                        {/* Chatting Via + Location row */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-100">
-                            <ChattingViaButton lead={lead} onUpdate={fetchLead} />
+                            <div>
+                                <Label className="text-[10px] text-gray-400 uppercase">Profile URL</Label>
+                                <Input value={lead.profileUrl || ''} onChange={(e) => handleDebouncedEdit('profileUrl', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                                {lead.profileUrl && <a href={lead.profileUrl} target="_blank" rel="noreferrer" className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5 mt-0.5"><Globe size={10} /> Open Link <ExternalLink size={8} /></a>}
+                            </div>
                             <div>
                                 <Label className="text-[10px] text-gray-400 uppercase">City</Label>
-                                <InlineEditField field="city" value={lead.city} />
-                            </div>
-                            <div>
-                                <Label className="text-[10px] text-gray-400 uppercase">State</Label>
-                                <InlineEditField field="state" value={lead.state} />
-                            </div>
-                            <div>
-                                <Label className="text-[10px] text-gray-400 uppercase">Address</Label>
-                                <InlineEditField field="address" value={lead.address} />
+                                <Input value={lead.city || ''} onChange={(e) => handleDebouncedEdit('city', e.target.value)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
                             </div>
                         </div>
                     </div>
 
-                    {/* Lead Details */}
+                    {/* CRM Details */}
                     <div className="bg-white rounded-[16px] shadow-sm border border-gray-100 p-4">
-                        <h2 className="font-heading text-sm font-medium text-gray-900 mb-4">Lead Details</h2>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <h2 className="font-heading text-sm font-medium text-gray-900 mb-4">CRM Details</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                             <div>
-                                <Label className="text-[10px] text-gray-400 uppercase">Source</Label>
-                                <InlineEditField field="sourceSheet" value={lead.sourceSheet} />
+                                <Label className="text-[10px] text-gray-400 uppercase">Type</Label>
+                                <Select value={lead.type || 'NA'} onValueChange={(v) => { handleInlineEdit('type', v); if (v === 'No' || v === 'NA') setLead(prev => ({ ...prev, category: null })); }}>
+                                    <SelectTrigger className="h-8 text-[12px] rounded-[8px] mt-0.5"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="Yes">Yes</SelectItem>
+                                        <SelectItem value="No">No</SelectItem>
+                                        <SelectItem value="NA">NA</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div>
-                                <Label className="text-[10px] text-gray-400 uppercase">Date Added</Label>
-                                <span className="text-[13px] text-gray-900">
-                                    {lead.dateAdded ? new Date(lead.dateAdded).toLocaleDateString('en-IN') : '-'}
-                                </span>
+                                <Label className="text-[10px] text-gray-400 uppercase">Category</Label>
+                                {lead.type === 'Yes' ? (
+                                    <Select value={lead.category || ''} onValueChange={(v) => handleInlineEdit('category', v)}>
+                                        <SelectTrigger className="h-8 text-[12px] rounded-[8px] mt-0.5"><SelectValue placeholder="Select..." /></SelectTrigger>
+                                        <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                ) : (
+                                    <div className="h-8 flex items-center text-[12px] text-gray-400 mt-0.5">—</div>
+                                )}
                             </div>
                             <div>
-                                <Label className="text-[10px] text-gray-400 uppercase">Last Contact</Label>
-                                <span className="text-[13px] text-gray-900">
-                                    {lead.lastContactDate ? new Date(lead.lastContactDate).toLocaleDateString('en-IN') : '-'}
-                                </span>
+                                <Label className="text-[10px] text-gray-400 uppercase">Priority</Label>
+                                <Select value={lead.priority || 'Low'} onValueChange={(v) => handleInlineEdit('priority', v)}>
+                                    <SelectTrigger className="h-8 text-[12px] rounded-[8px] mt-0.5"><SelectValue /></SelectTrigger>
+                                    <SelectContent>{PRIORITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                                </Select>
                             </div>
                             <div>
-                                <Label className="text-[10px] text-gray-400 uppercase">Next Follow-up</Label>
-                                <InlineEditField field="nextFollowupDate" value={lead.nextFollowupDate?.split('T')[0]} type="date" />
+                                <Label className="text-[10px] text-gray-400 uppercase">Vendor Type</Label>
+                                <Input value={lead.vendorType || ''} onChange={(e) => handleDebouncedEdit('vendorType', e.target.value)} placeholder="e.g. planner, decorator" className="h-8 text-[12px] rounded-[8px] mt-0.5" />
                             </div>
-                        </div>
-                        <div className="flex items-center gap-6 mt-4 pt-4 border-t border-gray-100">
-                            <label className="flex items-center gap-2 text-[12px]">
-                                <Checkbox 
-                                    checked={lead.portfolioSent} 
-                                    onCheckedChange={(v) => handleInlineEdit('portfolioSent', v)}
-                                />
-                                Portfolio Sent
-                            </label>
-                            <label className="flex items-center gap-2 text-[12px]">
-                                <Checkbox 
-                                    checked={lead.priceListSent} 
-                                    onCheckedChange={(v) => handleInlineEdit('priceListSent', v)}
-                                />
-                                Price List Sent
-                            </label>
-                            <label className="flex items-center gap-2 text-[12px]">
-                                <Checkbox 
-                                    checked={lead.waSent} 
-                                    onCheckedChange={(v) => handleInlineEdit('waSent', v)}
-                                />
-                                WA Sent
-                            </label>
+                            <div>
+                                <Label className="text-[10px] text-gray-400 uppercase">Chatting Via</Label>
+                                <Select value={lead.chattingVia || '_none_'} onValueChange={(v) => handleInlineEdit('chattingVia', v === '_none_' ? null : v)}>
+                                    <SelectTrigger className="h-8 text-[12px] rounded-[8px] mt-0.5"><SelectValue placeholder="Not Set" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="_none_">Not Set</SelectItem>
+                                        {WA_NUMBERS.map(n => <SelectItem key={n.value} value={n.value}>{n.label}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label className="text-[10px] text-gray-400 uppercase">Follow-up Date</Label>
+                                <Input type="date" value={lead.followUpDate ? lead.followUpDate.split('T')[0] : ''} onChange={(e) => handleInlineEdit('followUpDate', e.target.value || null)} className="h-8 text-[12px] rounded-[8px] mt-0.5" />
+                            </div>
                         </div>
                     </div>
 
-                    {/* Notes */}
-                    {lead.notes && (
-                        <div className="bg-white rounded-[16px] shadow-sm border border-gray-100 p-4">
-                            <h2 className="font-heading text-sm font-medium text-gray-900 mb-2">Notes</h2>
-                            <p className="text-[13px] text-gray-600 whitespace-pre-wrap">{lead.notes}</p>
+                    {/* Meta Info */}
+                    <div className="bg-white rounded-[16px] shadow-sm border border-gray-100 p-4">
+                        <h2 className="font-heading text-sm font-medium text-gray-900 mb-4">Meta</h2>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <Label className="text-[10px] text-gray-400 uppercase">Created At</Label>
+                                <span className="text-[13px] text-gray-900 block mt-0.5">
+                                    {(lead.createdAt || lead.dateAdded) ? new Date(lead.createdAt || lead.dateAdded).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                                </span>
+                            </div>
+                            <div>
+                                <Label className="text-[10px] text-gray-400 uppercase">Last Updated</Label>
+                                <span className="text-[13px] text-gray-900 block mt-0.5">
+                                    {lead.updatedAt ? new Date(lead.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                </span>
+                            </div>
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* Sidebar */}
@@ -577,7 +483,6 @@ export default function LeadOverview() {
                     </div>
                 </div>
             </div>
-
             {/* Call Log Panel */}
             {showCallLog && (
                 <CallLogPanel
@@ -587,288 +492,20 @@ export default function LeadOverview() {
                     teamMembers={teamMembers}
                 />
             )}
-
-            {/* Edit Modal */}
-            <EditLeadModal
-                open={editModalOpen}
-                onClose={() => setEditModalOpen(false)}
+            <CallbackSchedulerModal
+                isOpen={callbackModalOpen}
+                onClose={() => setCallbackModalOpen(false)}
                 lead={lead}
-                onSuccess={() => { setEditModalOpen(false); fetchLead(); }}
-                teamMembers={teamMembers}
+                onScheduled={() => {
+                    setLead(prev => ({ ...prev, category: "Callback" }));
+                }}
+                onSkip={() => {
+                    setLead(prev => ({ ...prev, category: "Callback" }));
+                }}
             />
         </div>
     );
 }
-
-// Edit Lead Modal Component
-function EditLeadModal({ open, onClose, lead, onSuccess, teamMembers }) {
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [formData, setFormData] = useState({});
-
-    useEffect(() => {
-        if (lead) {
-            setFormData({
-                companyName: lead.companyName || '',
-                personName: lead.personName || '',
-                phone: lead.phone || '',
-                phone2: lead.phone2 || '',
-                whatsapp: lead.whatsapp || '',
-                whatsapp2: lead.whatsapp2 || '',
-                instagram: lead.instagram || '',
-                email: lead.email || '',
-                city: lead.city || '',
-                address: lead.address || '',
-                state: lead.state || '',
-                category: lead.category || 'Needs Review',
-                priority: lead.priority || 'Medium',
-                pipelineStage: lead.pipelineStage || 'New Contact',
-                assignedTo: lead.assignedTo || '',
-                sourceSheet: lead.sourceSheet || '',
-                nextFollowupDate: lead.nextFollowupDate?.split('T')[0] || '',
-                notes: lead.notes || ''
-            });
-        }
-    }, [lead]);
-
-    const handleChange = (field, value) => {
-        setFormData(prev => ({ ...prev, [field]: value }));
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setLoading(true);
-        setError('');
-
-        try {
-            await axios.put(`${API_URL}/api/leads/${lead.id}`, formData, { withCredentials: true });
-            onSuccess();
-        } catch (err) {
-            setError(err.response?.data?.detail || 'Failed to update lead');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-2xl max-h-[90vh]">
-                <DialogHeader>
-                    <DialogTitle className="font-heading">Edit Lead</DialogTitle>
-                </DialogHeader>
-                <ScrollArea className="max-h-[calc(90vh-120px)]">
-                    <form onSubmit={handleSubmit} className="space-y-4 p-1">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Company Name *</Label>
-                                <Input
-                                    value={formData.companyName}
-                                    onChange={(e) => handleChange('companyName', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                    required
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Person Name</Label>
-                                <Input
-                                    value={formData.personName}
-                                    onChange={(e) => handleChange('personName', e.target.value)}
-                                    placeholder="Contact person"
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                    data-testid="edit-person-name"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Email</Label>
-                                <Input
-                                    type="email"
-                                    value={formData.email}
-                                    onChange={(e) => handleChange('email', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Phone</Label>
-                                <Input
-                                    value={formData.phone}
-                                    onChange={(e) => handleChange('phone', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Phone 2</Label>
-                                <Input
-                                    value={formData.phone2}
-                                    onChange={(e) => handleChange('phone2', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">WhatsApp</Label>
-                                <Input
-                                    value={formData.whatsapp}
-                                    onChange={(e) => handleChange('whatsapp', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">WhatsApp 2</Label>
-                                <Input
-                                    value={formData.whatsapp2}
-                                    onChange={(e) => handleChange('whatsapp2', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Instagram</Label>
-                                <Input
-                                    value={formData.instagram}
-                                    onChange={(e) => handleChange('instagram', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">City</Label>
-                                <Input
-                                    value={formData.city}
-                                    onChange={(e) => handleChange('city', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">State</Label>
-                                <Input
-                                    value={formData.state}
-                                    onChange={(e) => handleChange('state', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Address</Label>
-                                <Input
-                                    value={formData.address}
-                                    onChange={(e) => handleChange('address', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Category</Label>
-                                <Select value={formData.category} onValueChange={(v) => handleChange('category', v)}>
-                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {CATEGORIES.map(c => (
-                                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Priority</Label>
-                                <Select value={formData.priority} onValueChange={(v) => handleChange('priority', v)}>
-                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PRIORITIES.map(p => (
-                                            <SelectItem key={p} value={p}>{p}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Pipeline Stage</Label>
-                                <Select value={formData.pipelineStage} onValueChange={(v) => handleChange('pipelineStage', v)}>
-                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PIPELINE_STAGES.map(s => (
-                                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Assigned To</Label>
-                                <Select value={formData.assignedTo} onValueChange={(v) => handleChange('assignedTo', v)}>
-                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]">
-                                        <SelectValue placeholder="Select" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {teamMembers?.map(m => (
-                                            <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Source</Label>
-                                <Input
-                                    value={formData.sourceSheet}
-                                    onChange={(e) => handleChange('sourceSheet', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Next Follow-up</Label>
-                                <Input
-                                    type="date"
-                                    value={formData.nextFollowupDate}
-                                    onChange={(e) => handleChange('nextFollowupDate', e.target.value)}
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-[11px]">Notes</Label>
-                            <Textarea
-                                value={formData.notes}
-                                onChange={(e) => handleChange('notes', e.target.value)}
-                                className="text-[12px] rounded-[8px] min-h-[80px]"
-                            />
-                        </div>
-
-                        {error && (
-                            <div className="text-[12px] text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</div>
-                        )}
-
-                        <div className="flex justify-end gap-2 pt-2">
-                            <Button type="button" variant="outline" onClick={onClose} className="rounded-[8px]">
-                                Cancel
-                            </Button>
-                            <Button
-                                type="submit"
-                                disabled={loading}
-                                className="bg-[#E8536A] hover:bg-[#D43D54] text-white rounded-[8px]"
-                            >
-                                {loading ? 'Saving...' : 'Save Changes'}
-                            </Button>
-                        </div>
-                    </form>
-                </ScrollArea>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
 
 function ChattingViaButton({ lead, onUpdate }) {
     const [open, setOpen] = useState(false);

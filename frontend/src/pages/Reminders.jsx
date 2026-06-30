@@ -89,7 +89,7 @@ export default function Reminders() {
 }
 
 function ReminderRow({ lead, section, navigate }) {
-    const followupDate = lead.nextFollowupDate ? new Date(lead.nextFollowupDate) : null;
+    const followupDate = lead.followUpDate ? new Date(lead.followUpDate) : null;
     const dateStr = followupDate
         ? followupDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
         : '-';

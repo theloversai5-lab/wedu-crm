@@ -14,48 +14,28 @@ export default function ThisWeek() {
 
     const fetchData = async () => {
         try {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const weekEnd = new Date(today);
-            weekEnd.setDate(weekEnd.getDate() + 7);
-            weekEnd.setHours(23, 59, 59, 999);
-
             const [leadsRes, teamRes] = await Promise.all([
-                axios.get(`${API_URL}/api/leads?limit=500`, { withCredentials: true }),
+                axios.get(`${API_URL}/api/leads/this-week`, { withCredentials: true }),
                 axios.get(`${API_URL}/api/team`, { withCredentials: true })
             ]);
 
-            // Filter leads with nextFollowupDate in next 7 days
-            const weekLeads = (leadsRes.data.leads || []).filter(lead => {
-                if (!lead.nextFollowupDate) return false;
-                const followupDate = new Date(lead.nextFollowupDate);
-                return followupDate >= today && followupDate <= weekEnd;
-            });
+            const weekLeads = leadsRes.data.leads || [];
 
             // Group by date
             const grouped = {};
             weekLeads.forEach(lead => {
-                const dateKey = new Date(lead.nextFollowupDate).toLocaleDateString('en-IN', {
+                const dateKey = new Date(lead.followUpDate).toLocaleDateString('en-IN', {
                     weekday: 'long',
                     day: 'numeric',
                     month: 'long'
                 });
                 if (!grouped[dateKey]) {
                     grouped[dateKey] = {
-                        date: new Date(lead.nextFollowupDate),
+                        date: new Date(lead.followUpDate),
                         leads: []
                     };
                 }
                 grouped[dateKey].leads.push(lead);
-            });
-
-            // Sort leads within each date group
-            Object.values(grouped).forEach(group => {
-                group.leads.sort((a, b) => {
-                    const dateA = new Date(a.nextFollowupDate).getTime();
-                    const dateB = new Date(b.nextFollowupDate).getTime();
-                    return dateA - dateB;
-                });
             });
 
             // Sort date groups chronologically

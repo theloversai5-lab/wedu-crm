@@ -25,8 +25,8 @@ const SORT_OPTIONS = [
     { value: 'assignedTo_asc', label: 'By Assigned To' },
     { value: 'priorityRank_asc', label: 'By Priority' },
     { value: 'mostCommonResponseRank_asc', label: 'By Most Common Response' },
-    { value: 'nextFollowupDate_asc', label: 'Next Follow-up (Earliest)' },
-    { value: 'nextFollowupDate_desc', label: 'Next Follow-up (Latest)' },
+    { value: 'followUpDate_asc', label: 'Next Follow-up (Earliest)' },
+    { value: 'followUpDate_desc', label: 'Next Follow-up (Latest)' },
     { value: 'lastContactDate_asc', label: 'Last Contact (Oldest)' },
     { value: 'lastContactDate_desc', label: 'Last Contact (Newest)' },
 ];
@@ -42,13 +42,13 @@ const categoryConfig = {
         title: 'Interested',
         icon: '✅',
         color: 'bg-blue-500',
-        defaultSort: 'nextFollowupDate_asc',
+        defaultSort: 'followUpDate_asc',
     },
     'Call Back': {
         title: 'Call Back',
         icon: '🔁',
         color: 'bg-orange-500',
-        defaultSort: 'nextFollowupDate_asc',
+        defaultSort: 'followUpDate_asc',
     },
     'Busy': {
         title: 'Busy',
@@ -72,7 +72,7 @@ const categoryConfig = {
         title: 'Future Projection',
         icon: '🔮',
         color: 'bg-teal-500',
-        defaultSort: 'nextFollowupDate_asc',
+        defaultSort: 'followUpDate_asc',
     },
     'Needs Review': {
         title: 'Needs Review',
@@ -130,9 +130,9 @@ const sortLeads = (leads, sortKey, teamMembers) => {
                     return lastB - lastA; // Most recent first within group
                 }
                 break;
-            case 'nextFollowupDate':
-                valA = a.nextFollowupDate ? new Date(a.nextFollowupDate).getTime() : Infinity;
-                valB = b.nextFollowupDate ? new Date(b.nextFollowupDate).getTime() : Infinity;
+            case 'followUpDate':
+                valA = a.followUpDate ? new Date(a.followUpDate).getTime() : Infinity;
+                valB = b.followUpDate ? new Date(b.followUpDate).getTime() : Infinity;
                 break;
             case 'lastContactDate':
                 valA = a.lastContactDate ? new Date(a.lastContactDate).getTime() : 0;

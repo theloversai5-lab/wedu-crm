@@ -42,6 +42,7 @@ export default function ImportModal({ open, onClose, onSuccess }) {
     const [preview, setPreview] = useState(null);
     const [error, setError] = useState(null);
     const [dragActive, setDragActive] = useState(false);
+    const [columnMapping, setColumnMapping] = useState({});
 
     // Analyze results
     const [duplicates, setDuplicates] = useState([]);
@@ -67,6 +68,7 @@ export default function ImportModal({ open, onClose, onSuccess }) {
         setPreview(null);
         setError(null);
         setDragActive(false);
+        setColumnMapping({});
         setDuplicates([]);
         setNonDupCount(0);
         setAnalyzeErrors([]);
@@ -114,6 +116,21 @@ export default function ImportModal({ open, onClose, onSuccess }) {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             setPreview(res.data);
+            
+            const detectedColumns = res.data.columns;
+            const initialMapping = {};
+            detectedColumns.forEach(col => {
+                const lower = col.toLowerCase().trim();
+                if (['company', 'company name', 'name', 'firm', 'business name'].includes(lower)) initialMapping['companyName'] = col;
+                else if (['phone', 'phone number', 'contact', 'mobile'].includes(lower)) initialMapping['phone'] = col;
+                else if (['phone 2', 'alternate', 'secondary'].includes(lower)) initialMapping['phone2'] = col;
+                else if (['city', 'location', 'region'].includes(lower)) initialMapping['city'] = col;
+                else if (['category', 'type', 'vendor type', 'vendor'].includes(lower)) initialMapping['vendorType'] = col;
+                else if (['profile', 'url', 'profile url', 'link', 'website'].includes(lower)) initialMapping['profileUrl'] = col;
+                else if (['person', 'contact person', 'person name'].includes(lower)) initialMapping['personName'] = col;
+            });
+            setColumnMapping(initialMapping);
+            
             setStep('preview');
         } catch (err) {
             setError(err.response?.data?.detail || 'Failed to read file');
@@ -129,6 +146,15 @@ export default function ImportModal({ open, onClose, onSuccess }) {
         try {
             const formData = new FormData();
             formData.append('file', file);
+            
+            const backendMapping = {};
+            Object.entries(columnMapping).forEach(([crmField, csvCol]) => {
+                if (csvCol && csvCol !== '_ignore_') {
+                    backendMapping[csvCol] = crmField;
+                }
+            });
+            formData.append('columnMapping', JSON.stringify(backendMapping));
+
             const res = await axios.post(`${API_URL}/api/leads/import/analyze`, formData, {
                 withCredentials: true,
                 headers: { 'Content-Type': 'multipart/form-data' }
@@ -242,7 +268,7 @@ export default function ImportModal({ open, onClose, onSuccess }) {
                     </DialogTitle>
                 </DialogHeader>
 
-                <div className="flex-1 overflow-hidden">
+                <div className="flex-1 overflow-y-auto">
                     {/* UPLOAD */}
                     {step === 'upload' && (
                         <div className="space-y-4">
@@ -276,9 +302,9 @@ export default function ImportModal({ open, onClose, onSuccess }) {
                                 </div>
                             )}
                             <div className="bg-gray-50 rounded-[10px] p-4">
-                                <h4 className="text-[12px] font-medium text-gray-700 mb-2">Auto-detected columns:</h4>
+                                <h4 className="text-[12px] font-medium text-gray-700 mb-2">Import mapping</h4>
                                 <div className="text-[11px] text-gray-500 space-y-1">
-                                    <p>Company Name, Phone, Phone 2, WhatsApp, Instagram, Email, City, Category, Priority, Assigned To, Notes, Response 1-3, Next Follow-up, Portfolio Sent, Pipeline Stage, Source</p>
+                                    <p>Select your CSV file to manually map columns to CRM fields.</p>
                                 </div>
                             </div>
                         </div>
@@ -296,18 +322,37 @@ export default function ImportModal({ open, onClose, onSuccess }) {
                                 </div>
                                 <span className="text-[12px] font-medium text-green-700">{preview.totalRows} rows found</span>
                             </div>
-                            <div className="bg-gray-50 rounded-[10px] p-3">
-                                <h4 className="text-[11px] font-medium text-gray-700 mb-2">Column Mapping</h4>
-                                <div className="flex flex-wrap gap-2">
-                                    {Object.entries(preview.columnMapping).map(([orig, mapped]) => (
-                                        <span key={orig} className="text-[10px] bg-white px-2 py-1 rounded border border-gray-200">
-                                            {orig} <ChevronRight size={10} className="inline" /> <span className="font-medium text-[#E8536A]">{mapped}</span>
-                                        </span>
+                            <div className="bg-gray-50 rounded-[10px] p-4">
+                                <h4 className="text-[12px] font-medium text-gray-700 mb-3">Map Columns</h4>
+                                <div className="space-y-2">
+                                    {[
+                                        { key: 'companyName', label: 'Company Name' },
+                                        { key: 'phone', label: 'Phone 1 (Splits multiple numbers)' },
+                                        { key: 'phone2', label: 'Phone 2' },
+                                        { key: 'city', label: 'City' },
+                                        { key: 'vendorType', label: 'Vendor Type (e.g. planners, decorators)' },
+                                        { key: 'profileUrl', label: 'Profile URL' },
+                                        { key: 'personName', label: 'Person Name' },
+                                    ].map(field => (
+                                        <div key={field.key} className="flex items-center justify-between bg-white p-2 rounded border border-gray-100">
+                                            <span className="text-[11px] font-medium text-gray-700 w-1/3">{field.label}</span>
+                                            <Select 
+                                                value={columnMapping[field.key] || '_ignore_'} 
+                                                onValueChange={(val) => setColumnMapping(prev => ({ ...prev, [field.key]: val }))}
+                                            >
+                                                <SelectTrigger className="w-2/3 h-7 text-[11px]">
+                                                    <SelectValue placeholder="Select CSV Column" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="_ignore_">— Ignore —</SelectItem>
+                                                    {preview.columns.map(col => (
+                                                        <SelectItem key={col} value={col}>{col}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
                                     ))}
                                 </div>
-                                {preview.unmappedColumns?.length > 0 && (
-                                    <p className="text-[10px] text-gray-400 mt-2">Ignored: {preview.unmappedColumns.join(', ')}</p>
-                                )}
                             </div>
                             <div>
                                 <h4 className="text-[11px] font-medium text-gray-700 mb-2">Preview (first 10 rows)</h4>

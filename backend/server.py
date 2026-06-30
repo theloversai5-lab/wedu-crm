@@ -1,8 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
+import os
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query, Form
+from fastapi.responses import StreamingResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -15,16 +17,29 @@ from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Any, Dict
 import uuid
 from datetime import datetime, timezone, timedelta
+try:
+    import zoneinfo
+except ImportError:
+    from backports import zoneinfo
 import bcrypt
 import jwt
 from bson import ObjectId
 import pandas as pd
 
+# Google API Imports
+import google.oauth2.credentials
+import google_auth_oauthlib.flow
+from googleapiclient.discovery import build
+import google.auth.transport.requests
+import json
+import httplib2
+
 # MongoDB connection
 mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL')
 if not mongo_url:
     raise RuntimeError("MONGODB_URI or MONGO_URL environment variable is required")
-client = AsyncIOMotorClient(mongo_url)
+import certifi
+client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
 db = client[os.environ.get('DB_NAME', 'wedus_crm')]
 
 # JWT Config
@@ -123,6 +138,146 @@ async def require_admin(request: Request) -> dict:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
+# ============== GOOGLE CALENDAR HELPERS ==============
+
+async def get_google_calendar_service(user: dict):
+    if not user.get("googleRefreshToken"):
+        return None
+    
+    creds = google.oauth2.credentials.Credentials(
+        token=user.get("googleAccessToken"),
+        refresh_token=user.get("googleRefreshToken"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+        client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+    )
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(google.auth.transport.requests.Request())
+            # Update the user's access token in the database
+            await db.users.update_one(
+                {"_id": ObjectId(user["id"])},
+                {
+                    "$set": {
+                        "googleAccessToken": creds.token,
+                        "googleTokenExpiry": creds.expiry
+                    }
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to refresh Google token for user {user.get('email')}: {str(e)}")
+            return None
+
+    try:
+        service = build("calendar", "v3", credentials=creds)
+        return service
+    except Exception as e:
+        logger.error(f"Failed to build Google Calendar service for user {user.get('email')}: {str(e)}")
+        return None
+
+async def create_or_update_google_event(user: dict, lead: dict, followUpDate: datetime) -> Optional[str]:
+    service = await get_google_calendar_service(user)
+    if not service:
+        return None
+    kolkata_tz = zoneinfo.ZoneInfo("Asia/Kolkata")
+    
+    # Ensure datetime is aware and in Asia/Kolkata
+    if followUpDate.tzinfo is None:
+        followUpDate = followUpDate.replace(tzinfo=kolkata_tz)
+    else:
+        followUpDate = followUpDate.astimezone(kolkata_tz)
+        
+    start_time = followUpDate.isoformat()
+    end_time = (followUpDate + timedelta(minutes=30)).isoformat()
+    timezone_str = "Asia/Kolkata"
+    
+    event_body = {
+        'summary': f"📞 Call: {lead.get('companyName')}",
+        'description': f"Person: {lead.get('personName', '')}\nPhone: {lead.get('phone', '')}\nPhone 2: {lead.get('phone2', '')}\nCategory: Callback\nVendor Type: {lead.get('vendorType', '')}\nCity: {lead.get('city', '')}\nPriority: {lead.get('priority', '')}",
+        'start': {
+            'dateTime': start_time,
+            'timeZone': timezone_str,
+        },
+        'end': {
+            'dateTime': end_time,
+            'timeZone': timezone_str,
+        },
+        'reminders': {
+            'useDefault': False,
+            'overrides': [
+                {'method': 'email', 'minutes': 30},
+                {'method': 'popup', 'minutes': 15},
+            ],
+        },
+    }
+    
+    event_id = lead.get('googleCalendarEventId')
+    try:
+        if event_id:
+            # Update existing
+            event = service.events().update(calendarId='primary', eventId=event_id, body=event_body).execute()
+            return event.get('id')
+        else:
+            # Create new
+            event = service.events().insert(calendarId='primary', body=event_body).execute()
+            return event.get('id')
+    except Exception as e:
+        logger.error(f"Failed to create/update Google event for lead {lead.get('_id', lead.get('id'))}: {str(e)}")
+        return None
+
+async def delete_google_event(user: dict, event_id: str):
+    if not event_id:
+        return
+    service = await get_google_calendar_service(user)
+    if not service:
+        return
+    
+    try:
+        service.events().delete(calendarId='primary', eventId=event_id).execute()
+    except Exception as e:
+        logger.error(f"Failed to delete Google event {event_id}: {str(e)}")
+
+async def sync_google_calendar(user: dict, old_lead: dict, new_lead: dict):
+    if not user.get("googleRefreshToken"):
+        return
+    
+    old_category = old_lead.get("category")
+    new_category = new_lead.get("category")
+    old_date = old_lead.get("followUpDate")
+    new_date = new_lead.get("followUpDate")
+    
+    if isinstance(new_date, str):
+        try:
+            kolkata_tz = zoneinfo.ZoneInfo("Asia/Kolkata")
+            if new_date.endswith("Z") or "+00:00" in new_date:
+                # Came in as UTC, convert to IST by adding 5h30m
+                dt = datetime.fromisoformat(new_date.replace("Z", "+00:00"))
+                new_date = dt.astimezone(kolkata_tz)
+            else:
+                # No timezone suffix, treat as IST directly
+                dt = datetime.fromisoformat(new_date)
+                if dt.tzinfo is None:
+                    new_date = dt.replace(tzinfo=kolkata_tz)
+                else:
+                    new_date = dt.astimezone(kolkata_tz)
+        except Exception:
+            pass
+
+    became_callback = (new_category == "Callback" and old_category != "Callback" and new_date)
+    date_changed_while_callback = (new_category == "Callback" and old_category == "Callback" and new_date != old_date and new_date)
+    
+    if became_callback or date_changed_while_callback:
+        if isinstance(new_date, datetime):
+            event_id = await create_or_update_google_event(user, new_lead, new_date)
+            if event_id and event_id != new_lead.get("googleCalendarEventId"):
+                await db.leads.update_one({"_id": new_lead["_id"]}, {"$set": {"googleCalendarEventId": event_id}})
+                
+    elif old_category == "Callback" and new_category != "Callback":
+        if new_lead.get("googleCalendarEventId"):
+            await delete_google_event(user, new_lead["googleCalendarEventId"])
+            await db.leads.update_one({"_id": new_lead["_id"]}, {"$unset": {"googleCalendarEventId": ""}})
+
 # ============== PYDANTIC MODELS ==============
 
 class UserCreate(BaseModel):
@@ -154,55 +309,40 @@ class LeadCreate(BaseModel):
     personName: Optional[str] = None
     phone: Optional[str] = None
     phone2: Optional[str] = None
-    whatsapp: Optional[str] = None
-    whatsapp2: Optional[str] = None
-    primaryWhatsapp: Optional[int] = 1
-    instagram: Optional[str] = None
-    email: Optional[str] = None
     city: Optional[str] = None
-    address: Optional[str] = None
-    state: Optional[str] = None
-    status: Optional[str] = "active"
-    category: Optional[str] = "Needs Review"
-    priority: Optional[str] = "Medium"
-    pipelineStage: Optional[str] = "New Contact"
-    assignedTo: Optional[str] = None
-    sourceSheet: Optional[str] = None
-    nextFollowupDate: Optional[str] = None
-    lastContactDate: Optional[str] = None
-    portfolioSent: Optional[bool] = False
-    priceListSent: Optional[bool] = False
-    waSent: Optional[bool] = False
-    notes: Optional[str] = None
+    email: Optional[str] = None
+    whatsapp: Optional[str] = None
+    instagram: Optional[str] = None
+    profileUrl: Optional[str] = None
+    type: Optional[str] = "NA"
+    category: Optional[str] = None
+    priority: Optional[str] = "Low"
+    vendorType: Optional[str] = None
     chattingVia: Optional[str] = None
+    followUpDate: Optional[datetime] = None
+    googleCalendarEventId: Optional[str] = None
+    lastUpdate: Optional[str] = None
+    lastUpdateDate: Optional[datetime] = None
 
 class LeadUpdate(BaseModel):
     companyName: Optional[str] = None
     personName: Optional[str] = None
     phone: Optional[str] = None
     phone2: Optional[str] = None
-    whatsapp: Optional[str] = None
-    whatsapp2: Optional[str] = None
-    primaryWhatsapp: Optional[int] = None
-    instagram: Optional[str] = None
-    email: Optional[str] = None
     city: Optional[str] = None
-    address: Optional[str] = None
-    state: Optional[str] = None
-    status: Optional[str] = None
+    email: Optional[str] = None
+    whatsapp: Optional[str] = None
+    instagram: Optional[str] = None
+    profileUrl: Optional[str] = None
+    type: Optional[str] = None
     category: Optional[str] = None
     priority: Optional[str] = None
-    pipelineStage: Optional[str] = None
-    assignedTo: Optional[str] = None
-    sourceSheet: Optional[str] = None
-    nextFollowupDate: Optional[str] = None
-    lastContactDate: Optional[str] = None
-    portfolioSent: Optional[bool] = None
-    priceListSent: Optional[bool] = None
-    waSent: Optional[bool] = None
-    notes: Optional[str] = None
-    dateMarkedNotInterested: Optional[str] = None
+    vendorType: Optional[str] = None
     chattingVia: Optional[str] = None
+    followUpDate: Optional[datetime] = None
+    googleCalendarEventId: Optional[str] = None
+    lastUpdate: Optional[str] = None
+    lastUpdateDate: Optional[datetime] = None
 
 class ResponseHistoryEntry(BaseModel):
     response: str
@@ -212,10 +352,7 @@ class ResponseHistoryEntry(BaseModel):
     teamMemberName: Optional[str] = None
     duration: Optional[int] = None
     waNumberUsed: Optional[int] = None
-    portfolioSent: Optional[bool] = False
-    priceListSent: Optional[bool] = False
-    waSent: Optional[bool] = False
-    nextFollowupDate: Optional[str] = None
+    followUpDate: Optional[str] = None
 
 class BulkAction(BaseModel):
     leadIds: List[str]
@@ -226,14 +363,11 @@ class BulkAction(BaseModel):
 
 CATEGORY_RANK = {
     "Meeting Done": 1,
-    "Interested": 2,
-    "Call Back": 3,
-    "Busy": 4,
-    "No Response": 5,
-    "Foreign": 6,
-    "Future Projection": 7,
-    "Needs Review": 8,
-    "Not Interested": 9
+    "Highly Interested": 2,
+    "MND": 3,
+    "Ongoing Project": 4,
+    "Send Portfolio": 5,
+    "Callback": 6
 }
 
 PRIORITY_RANK = {
@@ -255,12 +389,7 @@ RESPONSE_RANK = {
     "Other": 7
 }
 
-PIPELINE_STAGES = [
-    "New Contact", "Interested", "Send Portfolio", "Time Given",
-    "Meeting Scheduled", "Meeting Done", "Project Follow-up", "Onboarded",
-    "Unknown", "Call Again 1", "Call Again 2", "Call Again 3",
-    "Not Answering", "Not Interested"
-]
+
 
 TEAM_COLORS = ["#E8536A", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#06B6D4"]
 
@@ -398,7 +527,7 @@ def map_column_name(col: str) -> Optional[str]:
         'response1': ['response 1', 'response1', 'r1', 'call 1', 'first response'],
         'response2': ['response 2', 'response2', 'r2', 'call 2', 'second response'],
         'response3': ['response 3', 'response3', 'r3', 'call 3', 'third response'],
-        'nextFollowupDate': ['next follow-up', 'followup date', 'next call', 'callback date', 'follow up date', 'nextfollowupdate', 'next followup'],
+        'followUpDate': ['next follow-up', 'followup date', 'next call', 'callback date', 'follow up date', 'nextfollowupdate', 'next followup'],
         'lastContactDate': ['last contact', 'last contacted', 'last call date', 'date of last contact', 'lastcontactdate'],
         'portfolioSent': ['portfolio sent', 'portfolio', 'port sent', 'portfoliosent'],
         'priceListSent': ['price list sent', 'price list', 'pricelist', 'pricelistsent'],
@@ -474,6 +603,106 @@ async def refresh_token(request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Refresh token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+@api_router.get("/auth/google")
+async def google_auth(request: Request):
+    user = await get_current_user(request)
+    
+    import urllib.parse
+    params = {
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID"),
+        "redirect_uri": os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback"),
+        "response_type": "code",
+        "scope": "https://www.googleapis.com/auth/calendar",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": user["id"]
+    }
+    authorization_url = "https://accounts.google.com/o/oauth2/auth?" + urllib.parse.urlencode(params)
+    
+    return {"url": authorization_url}
+
+@api_router.get("/auth/google/callback")
+async def google_auth_callback(request: Request, state: str, code: str):
+    try:
+        import httpx
+        
+        client_id = os.environ.get("GOOGLE_CLIENT_ID")
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+        redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback")
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": redirect_uri
+                }
+            )
+            token_data = resp.json()
+            
+            if "error" in token_data:
+                raise HTTPException(status_code=400, detail=f"Google OAuth Error: {token_data}")
+                
+            expiry = datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 3599))
+            
+            user_id = state
+            await db.users.update_one(
+                {"_id": ObjectId(user_id)},
+                {
+                    "$set": {
+                        "googleAccessToken": token_data.get("access_token"),
+                        "googleRefreshToken": token_data.get("refresh_token"),
+                        "googleTokenExpiry": expiry
+                }
+            }
+        )
+        
+        return RedirectResponse(url="http://localhost:3000/settings?google=connected")
+    except Exception as e:
+        logger.error(f"Google OAuth Callback Error: {str(e)}")
+        return RedirectResponse(url="http://localhost:3000/settings?google=error")
+
+@api_router.get("/auth/google/status")
+async def google_auth_status(request: Request):
+    user = await get_current_user(request)
+    # Check if user has a refresh token
+    connected = bool(user.get("googleRefreshToken"))
+    return {"connected": connected}
+
+@api_router.delete("/auth/google/disconnect")
+async def google_auth_disconnect(request: Request):
+    user = await get_current_user(request)
+    
+    # Revoke token with Google
+    token = user.get("googleRefreshToken") or user.get("googleAccessToken")
+    if token:
+        try:
+            revoke_request = httplib2.Http()
+            revoke_request.request(
+                f"https://oauth2.googleapis.com/revoke?token={token}",
+                method="POST",
+                headers={"content-type": "application/x-www-form-urlencoded"}
+            )
+        except Exception as e:
+            logger.error(f"Failed to revoke Google token: {str(e)}")
+            
+    # Remove from DB
+    await db.users.update_one(
+        {"_id": ObjectId(user["id"])},
+        {
+            "$unset": {
+                "googleAccessToken": "",
+                "googleRefreshToken": "",
+                "googleTokenExpiry": ""
+            }
+        }
+    )
+    
+    return {"message": "Disconnected"}
 
 # ============== PROFILE / SETTINGS ROUTES ==============
 
@@ -634,10 +863,47 @@ def calculate_most_common_response(response_history: list) -> tuple:
     rank = RESPONSE_RANK.get(most_common, 7)
     return most_common, rank
 
+async def _get_leads_for_date_range(request: Request, start_date: datetime, end_date: datetime):
+    user = await get_current_user(request)
+    query = {"followUpDate": {"$gte": start_date.isoformat(), "$lt": end_date.isoformat()}}
+    if user["role"] == "team_member":
+        query["assignedTo"] = user["id"]
+        
+    leads = await db.leads.find(query).sort("followUpDate", 1).to_list(1000)
+    return {"leads": [serialize_doc(lead) for lead in leads], "total": len(leads)}
+
+@api_router.get("/leads/today")
+async def get_leads_today(request: Request):
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return await _get_leads_for_date_range(request, start, end)
+
+@api_router.get("/leads/tomorrow")
+async def get_leads_tomorrow(request: Request):
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = today_start + timedelta(days=1)
+    end = start + timedelta(days=1)
+    return await _get_leads_for_date_range(request, start, end)
+
+@api_router.get("/leads/this-week")
+async def get_leads_this_week(request: Request):
+    # This week (Monday to Sunday)
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Get current day of week (0=Monday, 6=Sunday)
+    days_since_monday = today_start.weekday()
+    start = today_start - timedelta(days=days_since_monday)
+    end = start + timedelta(days=7)
+    return await _get_leads_for_date_range(request, start, end)
+
 @api_router.get("/leads")
 async def get_leads(
     request: Request,
+    type: Optional[str] = None,
     category: Optional[str] = None,
+    vendorType: Optional[str] = None,
     priority: Optional[str] = None,
     pipelineStage: Optional[str] = None,
     assignedTo: Optional[str] = None,
@@ -652,6 +918,8 @@ async def get_leads(
     sortDirection: Optional[int] = 1,
     sortField2: Optional[str] = None,
     sortDirection2: Optional[int] = 1,
+    followUpFrom: Optional[datetime] = None,
+    followUpTo: Optional[datetime] = None,
     limit: int = 50,
     skip: int = 0
 ):
@@ -665,8 +933,12 @@ async def get_leads(
     elif assignedTo:
         query["assignedTo"] = assignedTo
     
+    if type:
+        query["type"] = type
     if category:
         query["category"] = category
+    if vendorType:
+        query["vendorType"] = vendorType
     if priority:
         query["priority"] = priority
     if pipelineStage:
@@ -681,7 +953,7 @@ async def get_leads(
         query["isDuplicate"] = True
         query["duplicateDismissed"] = {"$ne": True}
     if chattingVia:
-        query["chattingVia"] = chattingVia
+        query["chattingVia"] = {"$regex": chattingVia, "$options": "i"}
     if source == "instagram":
         query["instagram"] = {"$exists": True, "$nin": [None, ""]}
     elif source == "whatsapp":
@@ -691,6 +963,31 @@ async def get_leads(
         ]
     elif source:
         query["sourceSheet"] = {"$regex": source, "$options": "i"}
+        
+    if followUpFrom or followUpTo:
+        date_filter_dt = {}
+        date_filter_str = {}
+        
+        if followUpFrom:
+            date_filter_dt["$gte"] = followUpFrom
+            # Format datetime as ISO string exactly as it might be stored
+            date_filter_str["$gte"] = followUpFrom.isoformat().replace("+00:00", "Z")
+        if followUpTo:
+            date_filter_dt["$lte"] = followUpTo
+            date_filter_str["$lte"] = followUpTo.isoformat().replace("+00:00", "Z")
+            
+        # MongoDB $or for both formats since it can be stored as BSON Date or String
+        date_query = {
+            "$or": [
+                {"followUpDate": date_filter_dt},
+                {"followUpDate": date_filter_str}
+            ]
+        }
+        
+        if query:
+            query = {"$and": [query, date_query]}
+        else:
+            query = date_query
     
     if search:
         search_query = {"$or": [
@@ -740,18 +1037,15 @@ async def get_leads_count(request: Request):
     
     counts = {
         "total": await db.leads.count_documents(base_query),
-        "today": await db.leads.count_documents({**base_query, "nextFollowupDate": {"$gte": today.isoformat(), "$lt": tomorrow.isoformat()}}),
-        "tomorrow": await db.leads.count_documents({**base_query, "nextFollowupDate": {"$gte": tomorrow.isoformat(), "$lt": (tomorrow + timedelta(days=1)).isoformat()}}),
-        "thisWeek": await db.leads.count_documents({**base_query, "nextFollowupDate": {"$gte": today.isoformat(), "$lt": week_end.isoformat()}}),
+        "today": await db.leads.count_documents({**base_query, "followUpDate": {"$gte": today.isoformat(), "$lt": tomorrow.isoformat()}}),
+        "tomorrow": await db.leads.count_documents({**base_query, "followUpDate": {"$gte": tomorrow.isoformat(), "$lt": (tomorrow + timedelta(days=1)).isoformat()}}),
+        "thisWeek": await db.leads.count_documents({**base_query, "followUpDate": {"$gte": today.isoformat(), "$lt": week_end.isoformat()}}),
         "meetingDone": await db.leads.count_documents({**base_query, "category": "Meeting Done"}),
-        "interested": await db.leads.count_documents({**base_query, "category": "Interested"}),
-        "callBack": await db.leads.count_documents({**base_query, "category": "Call Back"}),
-        "busy": await db.leads.count_documents({**base_query, "category": "Busy"}),
-        "noResponse": await db.leads.count_documents({**base_query, "category": "No Response"}),
-        "foreign": await db.leads.count_documents({**base_query, "category": "Foreign"}),
-        "futureProjection": await db.leads.count_documents({**base_query, "category": "Future Projection"}),
-        "needsReview": await db.leads.count_documents({**base_query, "category": "Needs Review"}),
-        "notInterested": await db.leads.count_documents({**base_query, "category": "Not Interested"}),
+        "highlyInterested": await db.leads.count_documents({**base_query, "category": "Highly Interested"}),
+        "mnd": await db.leads.count_documents({**base_query, "category": "MND"}),
+        "ongoingProject": await db.leads.count_documents({**base_query, "category": "Ongoing Project"}),
+        "sendPortfolio": await db.leads.count_documents({**base_query, "category": "Send Portfolio"}),
+        "callback": await db.leads.count_documents({**base_query, "category": "Callback"}),
         "instagram": await db.leads.count_documents({**base_query, "instagram": {"$exists": True, "$nin": [None, ""]}}),
         "whatsapp": await db.leads.count_documents({**base_query, "$or": [{"whatsapp": {"$exists": True, "$nin": [None, ""]}}, {"whatsapp2": {"$exists": True, "$nin": [None, ""]}}]}),
         "duplicates": await db.leads.count_documents({**base_query, "isDuplicate": True, "duplicateDismissed": {"$ne": True}})
@@ -843,8 +1137,15 @@ async def create_lead(lead: LeadCreate, request: Request):
     await get_current_user(request)
     
     lead_data = lead.model_dump()
+    
+    if lead_data.get("type") in ["No", "NA"]:
+        lead_data["category"] = None
+        
     lead_data = calculate_ranks(lead_data)
-    lead_data["dateAdded"] = datetime.now(timezone.utc).isoformat()
+    
+    now_iso = datetime.now(timezone.utc).isoformat()
+    lead_data["createdAt"] = now_iso
+    lead_data["updatedAt"] = now_iso
     lead_data["responseHistory"] = []
     lead_data["callCount"] = 0
     lead_data["isDuplicate"] = False
@@ -873,7 +1174,32 @@ async def update_lead(lead_id: str, lead_update: LeadUpdate, request: Request):
         raise HTTPException(status_code=403, detail="Access denied")
     
     update_data = {k: v for k, v in lead_update.model_dump().items() if v is not None}
+    
+    if "type" in update_data and update_data["type"] in ["No", "NA"]:
+        update_data["category"] = None
+    elif update_data.get("type") not in ["No", "NA"] and "type" not in update_data and lead.get("type") in ["No", "NA"]:
+        pass # If we update category while type is No/NA, maybe we should block or allow? The spec says "When type is set to No or NA, automatically set category to null."
+        # Actually if type is No/NA in the DB, and we update it, let's make sure it's enforced.
+    
+    if update_data.get("type") in ["No", "NA"] or (lead.get("type") in ["No", "NA"] and update_data.get("type") is None and "type" not in update_data):
+         # Enforce null category if type is No/NA
+         if "type" in update_data and update_data["type"] in ["No", "NA"]:
+             update_data["category"] = None
+         elif lead.get("type") in ["No", "NA"] and update_data.get("category"):
+             # Or if they try to update category while type is No/NA, we should probably ignore it or change type?
+             # Let's just strictly enforce when type is updated.
+             pass
+             
+    # Simpler: just enforce if 'type' is present in update_data or we can just check the final merged state.
+    final_type = update_data.get("type", lead.get("type"))
+    if final_type in ["No", "NA"]:
+        update_data["category"] = None
+
     update_data = calculate_ranks(update_data)
+    update_data["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    
+    if "lastUpdate" in update_data:
+        update_data["lastUpdateDate"] = datetime.now(timezone.utc).isoformat()
     
     # If category changed to Not Interested, set dateMarkedNotInterested
     if update_data.get("category") == "Not Interested" and lead.get("category") != "Not Interested":
@@ -882,6 +1208,7 @@ async def update_lead(lead_id: str, lead_update: LeadUpdate, request: Request):
     await db.leads.update_one({"_id": ObjectId(lead_id)}, {"$set": update_data})
     
     updated_lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
+    await sync_google_calendar(user, lead, updated_lead)
     return serialize_doc(updated_lead)
 
 @api_router.patch("/leads/{lead_id}")
@@ -896,12 +1223,22 @@ async def patch_lead(lead_id: str, updates: dict, request: Request):
     if user["role"] == "team_member" and lead.get("assignedTo") != user["id"]:
         raise HTTPException(status_code=403, detail="Access denied")
     
+    # Enforce type logic
+    final_type = updates.get("type", lead.get("type"))
+    if final_type in ["No", "NA"]:
+        updates["category"] = None
+        
     # Recalculate ranks if needed
     updates = calculate_ranks(updates)
+    updates["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    
+    if "lastUpdate" in updates:
+        updates["lastUpdateDate"] = datetime.now(timezone.utc).isoformat()
     
     await db.leads.update_one({"_id": ObjectId(lead_id)}, {"$set": updates})
     
     updated_lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
+    await sync_google_calendar(user, lead, updated_lead)
     return serialize_doc(updated_lead)
 
 @api_router.post("/leads/{lead_id}/response")
@@ -925,13 +1262,11 @@ async def add_response_history(lead_id: str, entry: ResponseHistoryEntry, reques
     response_history.append(entry_data)
     
     most_common, rank = calculate_most_common_response(response_history)
-    
     update_data = {
         "mostCommonResponse": most_common,
         "mostCommonResponseRank": rank,
         "lastContactDate": entry_data["timestamp"]
     }
-    
     # Update category based on response
     response_to_category = {
         "Interested": "Interested",
@@ -948,17 +1283,9 @@ async def add_response_history(lead_id: str, entry: ResponseHistoryEntry, reques
         update_data["category"] = new_cat
         update_data["categoryRank"] = CATEGORY_RANK.get(new_cat, 99)
     
-    # Update portfolio/pricelist/wa sent flags
-    if entry_data.get("portfolioSent"):
-        update_data["portfolioSent"] = True
-    if entry_data.get("priceListSent"):
-        update_data["priceListSent"] = True
-    if entry_data.get("waSent"):
-        update_data["waSent"] = True
-    
     # Update next follow-up
-    if entry_data.get("nextFollowupDate"):
-        update_data["nextFollowupDate"] = entry_data["nextFollowupDate"]
+    if entry_data.get("followUpDate"):
+        update_data["followUpDate"] = entry_data["followUpDate"]
     
     await db.leads.update_one(
         {"_id": ObjectId(lead_id)},
@@ -970,11 +1297,17 @@ async def add_response_history(lead_id: str, entry: ResponseHistoryEntry, reques
     )
     
     updated_lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
+    await sync_google_calendar(user, lead, updated_lead)
     return serialize_doc(updated_lead)
 
 @api_router.delete("/leads/{lead_id}")
 async def delete_lead(lead_id: str, request: Request):
+    user = await get_current_user(request)
     await require_admin(request)
+    
+    lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
+    if lead and lead.get("googleCalendarEventId"):
+        await delete_google_event(user, lead["googleCalendarEventId"])
     
     result = await db.leads.delete_one({"_id": ObjectId(lead_id)})
     if result.deleted_count == 0:
@@ -1206,9 +1539,15 @@ def parse_lead_row(row, column_mapping, user_id: str, user_name: str) -> dict:
             lead_data['priority'] = fuzzy_priority(value)
         elif mapped_field == 'pipelineStage':
             lead_data['pipelineStage'] = fuzzy_pipeline_stage(value)
-        elif mapped_field in ['nextFollowupDate', 'lastContactDate']:
+        elif mapped_field in ['followUpDate', 'lastContactDate']:
             lead_data[mapped_field] = parse_date(value)
-        elif mapped_field in ['phone', 'phone2', 'whatsapp', 'whatsapp2']:
+        elif mapped_field == 'phone':
+            parts = [p.strip() for p in re.split(r'[,\s]+', value) if p.strip()]
+            if parts:
+                lead_data['phone'] = clean_phone(parts[0])
+                if len(parts) > 1 and 'phone2' not in lead_data:
+                    lead_data['phone2'] = clean_phone(parts[1])
+        elif mapped_field in ['phone2', 'whatsapp', 'whatsapp2']:
             lead_data[mapped_field] = clean_phone(value)
         elif mapped_field == 'instagram':
             lead_data[mapped_field] = clean_instagram(value) or value
@@ -1220,8 +1559,6 @@ def parse_lead_row(row, column_mapping, user_id: str, user_name: str) -> dict:
         else:
             lead_data[mapped_field] = value
 
-    if 'category' not in lead_data or not lead_data['category']:
-        lead_data['category'] = 'Needs Review'
     if 'priority' not in lead_data or not lead_data['priority']:
         lead_data['priority'] = 'Low'
     if 'pipelineStage' not in lead_data or not lead_data['pipelineStage']:
@@ -1284,7 +1621,7 @@ def get_match_reason(lead_data: dict, existing: dict) -> str:
 # ============== IMPORT ENDPOINTS ==============
 
 @api_router.post("/leads/import/analyze")
-async def analyze_import(request: Request, file: UploadFile = File(...)):
+async def analyze_import(request: Request, file: UploadFile = File(...), columnMapping: str = Form(...)):
     """Parse file, detect duplicates, return non-duplicates and duplicate pairs."""
     user = await get_current_user(request)
     content = await file.read()
@@ -1294,11 +1631,11 @@ async def analyze_import(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
-    column_mapping = {}
-    for col in df.columns:
-        mapped = map_column_name(str(col))
-        if mapped:
-            column_mapping[str(col)] = mapped
+    import json
+    try:
+        column_mapping = json.loads(columnMapping)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid column mapping format")
 
     non_duplicates = []
     duplicates = []
@@ -1626,7 +1963,7 @@ async def get_calendar_events(
     end_iso = end.isoformat()
 
     # Follow-ups in this month
-    followup_query = {**base_query, "nextFollowupDate": {"$gte": start_iso, "$lt": end_iso}}
+    followup_query = {**base_query, "followUpDate": {"$gte": start_iso, "$lt": end_iso}}
     followups = await db.leads.find(followup_query).to_list(500)
 
     # Meetings (pipeline stage = Meeting Scheduled or Meeting Done) with response history timestamps
@@ -1644,15 +1981,15 @@ async def get_calendar_events(
         events.append({
             **serialize_doc(lead),
             "eventType": "followup",
-            "eventDate": lead.get("nextFollowupDate")
+            "eventDate": lead.get("followUpDate")
         })
         seen_ids.add(lid)
 
     for lead in meetings:
         lid = str(lead["_id"])
         if lid not in seen_ids:
-            # Use nextFollowupDate or lastContactDate as event date
-            event_date = lead.get("nextFollowupDate") or lead.get("lastContactDate") or lead.get("dateAdded")
+            # Use followUpDate or lastContactDate as event date
+            event_date = lead.get("followUpDate") or lead.get("lastContactDate") or lead.get("dateAdded")
             events.append({
                 **serialize_doc(lead),
                 "eventType": "meeting",
@@ -1678,20 +2015,20 @@ async def get_reminders(request: Request):
     week_end = today_start + timedelta(days=7)
 
     # Overdue: follow-up date < today
-    overdue_q = {**base_query, "nextFollowupDate": {"$lt": today_start.isoformat(), "$ne": None}}
-    overdue = await db.leads.find(overdue_q).sort("nextFollowupDate", 1).to_list(100)
+    overdue_q = {**base_query, "followUpDate": {"$lt": today_start.isoformat(), "$ne": None}}
+    overdue = await db.leads.find(overdue_q).sort("followUpDate", 1).to_list(100)
 
     # Today
-    today_q = {**base_query, "nextFollowupDate": {"$gte": today_start.isoformat(), "$lt": today_end.isoformat()}}
-    today_leads = await db.leads.find(today_q).sort("nextFollowupDate", 1).to_list(100)
+    today_q = {**base_query, "followUpDate": {"$gte": today_start.isoformat(), "$lt": today_end.isoformat()}}
+    today_leads = await db.leads.find(today_q).sort("followUpDate", 1).to_list(100)
 
     # Tomorrow
-    tomorrow_q = {**base_query, "nextFollowupDate": {"$gte": today_end.isoformat(), "$lt": tomorrow_end.isoformat()}}
-    tomorrow_leads = await db.leads.find(tomorrow_q).sort("nextFollowupDate", 1).to_list(100)
+    tomorrow_q = {**base_query, "followUpDate": {"$gte": today_end.isoformat(), "$lt": tomorrow_end.isoformat()}}
+    tomorrow_leads = await db.leads.find(tomorrow_q).sort("followUpDate", 1).to_list(100)
 
     # This week (rest of week after tomorrow)
-    week_q = {**base_query, "nextFollowupDate": {"$gte": tomorrow_end.isoformat(), "$lt": week_end.isoformat()}}
-    week_leads = await db.leads.find(week_q).sort("nextFollowupDate", 1).to_list(200)
+    week_q = {**base_query, "followUpDate": {"$gte": tomorrow_end.isoformat(), "$lt": week_end.isoformat()}}
+    week_leads = await db.leads.find(week_q).sort("followUpDate", 1).to_list(200)
 
     return {
         "overdue": [serialize_doc(lead) for lead in overdue],
@@ -1720,10 +2057,10 @@ async def get_dashboard_stats(request: Request):
     tomorrow = today + timedelta(days=1)
     week_end = today + timedelta(days=7)
     
-    # Pipeline stages breakdown
+    # Category mapped pipeline stats
     pipeline_stats = []
-    for stage in PIPELINE_STAGES:
-        count = await db.leads.count_documents({**base_query, "pipelineStage": stage})
+    for stage in CATEGORY_RANK.keys():
+        count = await db.leads.count_documents({**base_query, "category": stage})
         pipeline_stats.append({"stage": stage, "count": count})
     
     # Category breakdown
@@ -1740,9 +2077,9 @@ async def get_dashboard_stats(request: Request):
     
     stats = {
         "totalLeads": await db.leads.count_documents(base_query),
-        "todayFollowups": await db.leads.count_documents({**base_query, "nextFollowupDate": {"$gte": today.isoformat(), "$lt": tomorrow.isoformat()}}),
-        "tomorrowFollowups": await db.leads.count_documents({**base_query, "nextFollowupDate": {"$gte": tomorrow.isoformat(), "$lt": (tomorrow + timedelta(days=1)).isoformat()}}),
-        "weekFollowups": await db.leads.count_documents({**base_query, "nextFollowupDate": {"$gte": today.isoformat(), "$lt": week_end.isoformat()}}),
+        "todayFollowups": await db.leads.count_documents({**base_query, "followUpDate": {"$gte": today.isoformat(), "$lt": tomorrow.isoformat()}}),
+        "tomorrowFollowups": await db.leads.count_documents({**base_query, "followUpDate": {"$gte": tomorrow.isoformat(), "$lt": (tomorrow + timedelta(days=1)).isoformat()}}),
+        "weekFollowups": await db.leads.count_documents({**base_query, "followUpDate": {"$gte": today.isoformat(), "$lt": week_end.isoformat()}}),
         "interestedLeads": await db.leads.count_documents({**base_query, "category": "Interested"}),
         "meetingsDone": await db.leads.count_documents({**base_query, "category": "Meeting Done"}),
         "pipelineStats": pipeline_stats,
@@ -1770,7 +2107,7 @@ async def startup_db():
     await db.leads.create_index("priority")
     await db.leads.create_index("pipelineStage")
     await db.leads.create_index("assignedTo")
-    await db.leads.create_index("nextFollowupDate")
+    await db.leads.create_index("followUpDate")
     await db.leads.create_index("city")
     await db.leads.create_index("phone")
     await db.leads.create_index("instagram")
@@ -1815,8 +2152,9 @@ async def startup_db():
             logger.info(f"Team member created: {member['email']}")
     
     # Write test credentials
-    Path("/app/memory").mkdir(parents=True, exist_ok=True)
-    with open("/app/memory/test_credentials.md", "w") as f:
+    memory_dir = Path(__file__).parent.parent / "memory"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    with open(memory_dir / "test_credentials.md", "w") as f:
         f.write("# Wed Us CRM Test Credentials\n\n")
         f.write("## Admin Account\n")
         f.write(f"- Email: {admin_email}\n")

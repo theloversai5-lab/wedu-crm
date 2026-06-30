@@ -23,32 +23,11 @@ export default function Tomorrow() {
 
     const fetchData = async () => {
         try {
-            const tomorrowStart = new Date();
-            tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-            tomorrowStart.setHours(0, 0, 0, 0);
-            const tomorrowEnd = new Date(tomorrowStart);
-            tomorrowEnd.setHours(23, 59, 59, 999);
-
             const [leadsRes, teamRes] = await Promise.all([
-                axios.get(`${API_URL}/api/leads?limit=200`, { withCredentials: true }),
+                axios.get(`${API_URL}/api/leads/tomorrow`, { withCredentials: true }),
                 axios.get(`${API_URL}/api/team`, { withCredentials: true })
             ]);
-
-            // Filter leads with nextFollowupDate = tomorrow
-            const tomorrowLeads = (leadsRes.data.leads || []).filter(lead => {
-                if (!lead.nextFollowupDate) return false;
-                const followupDate = new Date(lead.nextFollowupDate);
-                return followupDate >= tomorrowStart && followupDate <= tomorrowEnd;
-            });
-
-            // Sort by time
-            tomorrowLeads.sort((a, b) => {
-                const dateA = new Date(a.nextFollowupDate).getTime();
-                const dateB = new Date(b.nextFollowupDate).getTime();
-                return dateA - dateB;
-            });
-
-            setLeads(tomorrowLeads);
+            setLeads(leadsRes.data.leads || []);
             setTeamMembers(teamRes.data);
         } catch (err) {
             console.error('Error fetching data:', err);

@@ -46,23 +46,21 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
         personName: '',
         phone: '',
         phone2: '',
+        companyName: '',
+        personName: '',
+        phone: '',
+        phone2: '',
         whatsapp: '',
-        whatsapp2: '',
         instagram: '',
+        profileUrl: '',
         email: '',
         city: '',
-        address: '',
-        state: '',
+        type: 'NA',
         category: defaultCategory,
         priority: 'Medium',
-        pipelineStage: 'New Contact',
-        assignedTo: '',
-        sourceSheet: '',
-        nextFollowupDate: '',
-        portfolioSent: false,
-        priceListSent: false,
-        waSent: false,
-        notes: ''
+        vendorType: '',
+        chattingVia: '',
+        followUpDate: ''
     });
 
     // Update category when defaultCategory changes
@@ -94,22 +92,16 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
                 phone: '',
                 phone2: '',
                 whatsapp: '',
-                whatsapp2: '',
                 instagram: '',
+                profileUrl: '',
                 email: '',
                 city: '',
-                address: '',
-                state: '',
+                type: 'NA',
                 category: defaultCategory,
                 priority: 'Medium',
-                pipelineStage: 'New Contact',
-                assignedTo: '',
-                sourceSheet: '',
-                nextFollowupDate: '',
-                portfolioSent: false,
-                priceListSent: false,
-                waSent: false,
-                notes: ''
+                vendorType: '',
+                chattingVia: '',
+                followUpDate: ''
             });
         } catch (err) {
             setError(err.response?.data?.detail || 'Failed to create lead');
@@ -192,7 +184,7 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
                             </div>
                         </div>
 
-                        {/* WhatsApp & Instagram */}
+                        {/* WhatsApp, Instagram & Profile URL */}
                         <div className="grid grid-cols-3 gap-4">
                             <div className="space-y-2">
                                 <Label className="text-[11px]">WhatsApp</Label>
@@ -204,20 +196,20 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label className="text-[11px]">WhatsApp 2</Label>
-                                <Input
-                                    value={formData.whatsapp2}
-                                    onChange={(e) => handleChange('whatsapp2', e.target.value)}
-                                    placeholder="Secondary WhatsApp"
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
                                 <Label className="text-[11px]">Instagram</Label>
                                 <Input
                                     value={formData.instagram}
                                     onChange={(e) => handleChange('instagram', e.target.value)}
                                     placeholder="@handle"
+                                    className="h-9 text-[12px] rounded-[8px]"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-[11px]">Profile URL</Label>
+                                <Input
+                                    value={formData.profileUrl}
+                                    onChange={(e) => handleChange('profileUrl', e.target.value)}
+                                    placeholder="https://"
                                     className="h-9 text-[12px] rounded-[8px]"
                                 />
                             </div>
@@ -235,33 +227,28 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
                                     data-testid="add-lead-city"
                                 />
                             </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">State</Label>
-                                <Input
-                                    value={formData.state}
-                                    onChange={(e) => handleChange('state', e.target.value)}
-                                    placeholder="State"
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Address</Label>
-                                <Input
-                                    value={formData.address}
-                                    onChange={(e) => handleChange('address', e.target.value)}
-                                    placeholder="Full address"
-                                    className="h-9 text-[12px] rounded-[8px]"
-                                />
-                            </div>
                         </div>
 
                         {/* Status Fields */}
                         <div className="grid grid-cols-3 gap-4">
                             <div className="space-y-2">
-                                <Label className="text-[11px]">Category</Label>
-                                <Select value={formData.category} onValueChange={(v) => handleChange('category', v)}>
-                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]" data-testid="add-lead-category">
+                                <Label className="text-[11px]">Type</Label>
+                                <Select value={formData.type} onValueChange={(v) => handleChange('type', v)}>
+                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]">
                                         <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {['Yes', 'No', 'NA'].map(t => (
+                                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-[11px]">Category</Label>
+                                <Select value={formData.category} onValueChange={(v) => handleChange('category', v)} disabled={formData.type !== 'Yes'}>
+                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]" data-testid="add-lead-category">
+                                        <SelectValue placeholder={formData.type === 'Yes' ? "Select Category" : "—"} />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {CATEGORIES.map(c => (
@@ -283,93 +270,37 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Pipeline Stage</Label>
-                                <Select value={formData.pipelineStage} onValueChange={(v) => handleChange('pipelineStage', v)}>
-                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PIPELINE_STAGES.map(s => (
-                                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
                         </div>
 
-                        {/* Assignment & Source */}
+                        {/* Extra Properties */}
                         <div className="grid grid-cols-3 gap-4">
                             <div className="space-y-2">
-                                <Label className="text-[11px]">Assigned To</Label>
-                                <Select value={formData.assignedTo} onValueChange={(v) => handleChange('assignedTo', v)}>
-                                    <SelectTrigger className="h-9 text-[12px] rounded-[8px]">
-                                        <SelectValue placeholder="Select team member" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {teamMembers?.map(m => (
-                                            <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label className="text-[11px]">Source</Label>
+                                <Label className="text-[11px]">Vendor Type</Label>
                                 <Input
-                                    value={formData.sourceSheet}
-                                    onChange={(e) => handleChange('sourceSheet', e.target.value)}
-                                    placeholder="Lead source"
+                                    value={formData.vendorType}
+                                    onChange={(e) => handleChange('vendorType', e.target.value)}
+                                    placeholder="Venue, Photographer..."
                                     className="h-9 text-[12px] rounded-[8px]"
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label className="text-[11px]">Next Follow-up</Label>
+                                <Label className="text-[11px]">Chatting Via</Label>
+                                <Input
+                                    value={formData.chattingVia}
+                                    onChange={(e) => handleChange('chattingVia', e.target.value)}
+                                    placeholder="WhatsApp, IG..."
+                                    className="h-9 text-[12px] rounded-[8px]"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-[11px]">Follow-up Date</Label>
                                 <Input
                                     type="date"
-                                    value={formData.nextFollowupDate}
-                                    onChange={(e) => handleChange('nextFollowupDate', e.target.value)}
+                                    value={formData.followUpDate}
+                                    onChange={(e) => handleChange('followUpDate', e.target.value)}
                                     className="h-9 text-[12px] rounded-[8px]"
                                 />
                             </div>
-                        </div>
-
-                        {/* Flags */}
-                        <div className="flex items-center gap-6">
-                            <label className="flex items-center gap-2 text-[12px]">
-                                <Checkbox 
-                                    checked={formData.portfolioSent} 
-                                    onCheckedChange={(v) => handleChange('portfolioSent', v)} 
-                                    className="h-4 w-4"
-                                />
-                                Portfolio Sent
-                            </label>
-                            <label className="flex items-center gap-2 text-[12px]">
-                                <Checkbox 
-                                    checked={formData.priceListSent} 
-                                    onCheckedChange={(v) => handleChange('priceListSent', v)} 
-                                    className="h-4 w-4"
-                                />
-                                Price List Sent
-                            </label>
-                            <label className="flex items-center gap-2 text-[12px]">
-                                <Checkbox 
-                                    checked={formData.waSent} 
-                                    onCheckedChange={(v) => handleChange('waSent', v)} 
-                                    className="h-4 w-4"
-                                />
-                                WA Sent
-                            </label>
-                        </div>
-
-                        {/* Notes */}
-                        <div className="space-y-2">
-                            <Label className="text-[11px]">Notes</Label>
-                            <Textarea
-                                value={formData.notes}
-                                onChange={(e) => handleChange('notes', e.target.value)}
-                                placeholder="Add any notes..."
-                                className="text-[12px] rounded-[8px] min-h-[80px]"
-                            />
                         </div>
 
                         {error && (

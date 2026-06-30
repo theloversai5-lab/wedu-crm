@@ -6,7 +6,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import AllLeads from "./pages/AllLeads";
 import LeadOverview from "./pages/LeadOverview";
-import Pipeline from "./pages/Pipeline";
+
 import Today from "./pages/Today";
 import Tomorrow from "./pages/Tomorrow";
 import ThisWeek from "./pages/ThisWeek";
@@ -72,7 +72,7 @@ function AppRoutes() {
                 <Route path="this-week" element={<ThisWeek />} />
                 <Route path="leads" element={<AllLeads />} />
                 <Route path="leads/:id" element={<LeadOverview />} />
-                <Route path="pipeline" element={<Pipeline />} />
+
                 
                 {/* Category Routes */}
                 <Route path="category/meeting-done" element={<CategoryPage category="Meeting Done" />} />

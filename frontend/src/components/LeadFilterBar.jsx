@@ -8,18 +8,18 @@ import {
 } from './ui/select';
 
 const CATEGORIES = [
-    'Meeting Done', 'Interested', 'Call Back', 'Busy', 'No Response',
-    'Foreign', 'Future Projection', 'Needs Review', 'Not Interested'
+    'Meeting Done', 'Highly Interested', 'MND', 'Ongoing Project',
+    'Send Portfolio', 'Callback'
 ];
-const PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Review', 'Archive'];
+const PRIORITIES = ['High', 'Medium', 'Low'];
 
 export function LeadFilterBar({
     search, onSearchChange,
+    typeFilter, onTypeChange,
+    vendorTypeFilter, onVendorTypeChange,
     categoryFilter, onCategoryChange,
     priorityFilter, onPriorityChange,
-    assignedToFilter, onAssignedToChange,
     cityFilter, onCityChange,
-    portfolioSentFilter, onPortfolioSentChange,
     showDuplicatesOnly, onDuplicatesChange,
     chattingViaFilter, onChattingViaChange,
     hasFilters, onClearFilters,
@@ -35,6 +35,28 @@ export function LeadFilterBar({
                     placeholder="Search company, name, phone, city..."
                     className="pl-8 h-8 text-[11px] rounded-[8px]"
                     data-testid="search-leads-input"
+                />
+            </div>
+
+            <Select value={typeFilter || undefined} onValueChange={(v) => onTypeChange(v === '_all_' ? '' : v)}>
+                <SelectTrigger className="w-[110px] h-8 text-[11px] rounded-[8px]" data-testid="type-filter">
+                    <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="_all_">All Types</SelectItem>
+                    <SelectItem value="Yes">Yes</SelectItem>
+                    <SelectItem value="No">No</SelectItem>
+                    <SelectItem value="NA">NA</SelectItem>
+                </SelectContent>
+            </Select>
+
+            <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Input
+                    value={vendorTypeFilter || ''}
+                    onChange={(e) => onVendorTypeChange(e.target.value)}
+                    placeholder="Vendor Type (e.g. planner)"
+                    className="pl-8 h-8 text-[11px] rounded-[8px] w-[160px]"
                 />
             </div>
 
@@ -62,17 +84,7 @@ export function LeadFilterBar({
                 </SelectContent>
             </Select>
 
-            <Select value={assignedToFilter || undefined} onValueChange={(v) => onAssignedToChange(v === '_all_' ? '' : v)}>
-                <SelectTrigger className="w-[120px] h-8 text-[11px] rounded-[8px]" data-testid="assigned-filter">
-                    <SelectValue placeholder="Assigned To" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="_all_">All</SelectItem>
-                    {teamMembers.map(m => (
-                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
+
 
             <Select value={cityFilter || undefined} onValueChange={(v) => onCityChange(v === '_all_' ? '' : v)}>
                 <SelectTrigger className="w-[100px] h-8 text-[11px] rounded-[8px]">
@@ -86,16 +98,7 @@ export function LeadFilterBar({
                 </SelectContent>
             </Select>
 
-            <Select value={portfolioSentFilter || undefined} onValueChange={(v) => onPortfolioSentChange(v === '_all_' ? '' : v)}>
-                <SelectTrigger className="w-[110px] h-8 text-[11px] rounded-[8px]">
-                    <SelectValue placeholder="Portfolio" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="_all_">All</SelectItem>
-                    <SelectItem value="yes">Sent</SelectItem>
-                    <SelectItem value="no">Not Sent</SelectItem>
-                </SelectContent>
-            </Select>
+
 
             <label className="flex items-center gap-1.5 text-[11px] text-gray-600 cursor-pointer">
                 <Checkbox
