@@ -323,6 +323,8 @@ class LeadCreate(BaseModel):
     googleCalendarEventId: Optional[str] = None
     lastUpdate: Optional[str] = None
     lastUpdateDate: Optional[datetime] = None
+    callbackNote: Optional[str] = None
+    notes: Optional[List[Dict[str, Any]]] = None
 
 class LeadUpdate(BaseModel):
     companyName: Optional[str] = None
@@ -343,6 +345,12 @@ class LeadUpdate(BaseModel):
     googleCalendarEventId: Optional[str] = None
     lastUpdate: Optional[str] = None
     lastUpdateDate: Optional[datetime] = None
+    callbackNote: Optional[str] = None
+    notes: Optional[List[Dict[str, Any]]] = None
+
+class NoteCreate(BaseModel):
+    text: str
+    source: Optional[str] = "manual"
 
 class ResponseHistoryEntry(BaseModel):
     response: str
@@ -1194,11 +1202,20 @@ async def update_lead(lead_id: str, lead_update: LeadUpdate, request: Request):
     final_type = update_data.get("type", lead.get("type"))
     if final_type in ["No", "NA"]:
         update_data["category"] = None
+        update_data["callbackNote"] = None
+        
+    # If callback is explicitly cleared (followUpDate set to None and category is cleared)
+    if "followUpDate" in update_data and update_data["followUpDate"] is None:
+        if not update_data.get("category"):
+            update_data["callbackNote"] = None
 
     update_data = calculate_ranks(update_data)
     update_data["updatedAt"] = datetime.now(timezone.utc).isoformat()
     
-    if "lastUpdate" in update_data:
+    if update_data.get("callbackNote"):
+        update_data["lastUpdate"] = f"Callback: {update_data['callbackNote']}"
+        update_data["lastUpdateDate"] = datetime.now(timezone.utc).isoformat()
+    elif "lastUpdate" in update_data:
         update_data["lastUpdateDate"] = datetime.now(timezone.utc).isoformat()
     
     # If category changed to Not Interested, set dateMarkedNotInterested
@@ -1227,12 +1244,21 @@ async def patch_lead(lead_id: str, updates: dict, request: Request):
     final_type = updates.get("type", lead.get("type"))
     if final_type in ["No", "NA"]:
         updates["category"] = None
+        updates["callbackNote"] = None
+        
+    # If callback is explicitly cleared (followUpDate set to None and category is cleared)
+    if "followUpDate" in updates and updates["followUpDate"] is None:
+        if not updates.get("category"):
+            updates["callbackNote"] = None
         
     # Recalculate ranks if needed
     updates = calculate_ranks(updates)
     updates["updatedAt"] = datetime.now(timezone.utc).isoformat()
     
-    if "lastUpdate" in updates:
+    if updates.get("callbackNote"):
+        updates["lastUpdate"] = f"Callback: {updates['callbackNote']}"
+        updates["lastUpdateDate"] = datetime.now(timezone.utc).isoformat()
+    elif "lastUpdate" in updates:
         updates["lastUpdateDate"] = datetime.now(timezone.utc).isoformat()
     
     await db.leads.update_one({"_id": ObjectId(lead_id)}, {"$set": updates})
@@ -1298,6 +1324,46 @@ async def add_response_history(lead_id: str, entry: ResponseHistoryEntry, reques
     
     updated_lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
     await sync_google_calendar(user, lead, updated_lead)
+    return serialize_doc(updated_lead)
+
+@api_router.post("/leads/{lead_id}/notes")
+async def add_note(lead_id: str, note: NoteCreate, request: Request):
+    user = await get_current_user(request)
+    
+    lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+        
+    if user["role"] == "team_member" and lead.get("assignedTo") != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    now_ist = datetime.now(zoneinfo.ZoneInfo("Asia/Kolkata")).isoformat()
+    now_utc = datetime.now(timezone.utc).isoformat()
+    
+    note_obj = {
+        "text": note.text,
+        "createdAt": now_ist,
+        "createdBy": user.get("name", user.get("email")),
+        "source": note.source
+    }
+    
+    if note.source == "manual":
+        update_query = {
+            "$push": {"notes": note_obj},
+            "$set": {
+                "lastUpdate": note.text,
+                "lastUpdateDate": now_utc,
+                "updatedAt": now_utc
+            }
+        }
+    else:
+        update_query = {
+            "$push": {"notes": note_obj}
+        }
+    
+    await db.leads.update_one({"_id": ObjectId(lead_id)}, update_query)
+    
+    updated_lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
     return serialize_doc(updated_lead)
 
 @api_router.delete("/leads/{lead_id}")

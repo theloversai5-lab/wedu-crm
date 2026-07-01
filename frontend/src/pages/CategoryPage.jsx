@@ -38,53 +38,41 @@ const categoryConfig = {
         color: 'bg-green-500',
         defaultSort: 'lastContactDate_desc',
     },
-    'Interested': {
-        title: 'Interested',
+    'Highly Interested': {
+        title: 'Highly Interested',
         icon: '✅',
         color: 'bg-blue-500',
         defaultSort: 'followUpDate_asc',
     },
-    'Call Back': {
-        title: 'Call Back',
-        icon: '🔁',
-        color: 'bg-orange-500',
+    'MND': {
+        title: 'MND',
+        icon: '👥',
+        color: 'bg-indigo-500',
         defaultSort: 'followUpDate_asc',
     },
-    'Busy': {
-        title: 'Busy',
-        icon: '⏳',
-        color: 'bg-yellow-500',
+    'Ongoing Project': {
+        title: 'Ongoing Project',
+        icon: '🔄',
+        color: 'bg-teal-500',
         defaultSort: 'lastContactDate_desc',
     },
-    'No Response': {
-        title: 'No Response',
-        icon: '📵',
-        color: 'bg-gray-500',
+    'Send Portfolio': {
+        title: 'Send Portfolio',
+        icon: '📩',
+        color: 'bg-purple-500',
         defaultSort: 'lastContactDate_asc',
     },
-    'Foreign': {
-        title: 'Foreign',
-        icon: '🌍',
-        color: 'bg-purple-500',
-        defaultSort: 'companyName_asc',
-    },
-    'Future Projection': {
-        title: 'Future Projection',
-        icon: '🔮',
-        color: 'bg-teal-500',
+    'Callback': {
+        title: 'Callback',
+        icon: '📞',
+        color: 'bg-orange-500',
         defaultSort: 'followUpDate_asc',
-    },
-    'Needs Review': {
-        title: 'Needs Review',
-        icon: '❓',
-        color: 'bg-amber-500',
-        defaultSort: 'dateAdded_asc',
     },
     'Not Interested': {
         title: 'Not Interested',
         icon: '❌',
         color: 'bg-red-500',
-        defaultSort: 'dateMarkedNotInterested_desc',
+        defaultSort: 'lastContactDate_desc',
     },
 };
 

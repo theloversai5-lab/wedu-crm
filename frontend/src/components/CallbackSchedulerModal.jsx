@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
 import { Calendar, Clock, Phone } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -14,6 +15,7 @@ export default function CallbackSchedulerModal({ isOpen, onClose, lead, onSchedu
     const [time, setTime] = useState('10:00');
     const [googleConnected, setGoogleConnected] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [callbackNote, setCallbackNote] = useState('');
 
     useEffect(() => {
         if (isOpen) {
@@ -22,6 +24,7 @@ export default function CallbackSchedulerModal({ isOpen, onClose, lead, onSchedu
             tomorrow.setDate(tomorrow.getDate() + 1);
             setDate(tomorrow.toISOString().split('T')[0]);
             setTime('10:00');
+            setCallbackNote('');
             
             // Check Google status
             const checkGoogle = async () => {
@@ -41,8 +44,16 @@ export default function CallbackSchedulerModal({ isOpen, onClose, lead, onSchedu
             const datetimeStr = `${date}T${time}:00+05:30`;
             await axios.patch(`${API_URL}/api/leads/${lead._id || lead.id}`, {
                 category: "Callback",
-                followUpDate: datetimeStr
+                followUpDate: datetimeStr,
+                callbackNote: callbackNote || null
             }, { withCredentials: true });
+            
+            if (callbackNote) {
+                await axios.post(`${API_URL}/api/leads/${lead._id || lead.id}/notes`, {
+                    text: `Callback scheduled for ${date} at ${time} — ${callbackNote}`,
+                    source: "system"
+                }, { withCredentials: true });
+            }
             
             if (googleConnected) {
                 toast.success(`Callback scheduled for ${date} at ${time}! Added to Google Calendar ✓`);
@@ -123,6 +134,17 @@ export default function CallbackSchedulerModal({ isOpen, onClose, lead, onSchedu
                             Connect Google Calendar in Settings to get reminders
                         </p>
                     )}
+                    
+                    <div className="space-y-2 mt-2">
+                        <Label className="text-xs text-gray-500">Callback Note (Optional)</Label>
+                        <Textarea 
+                            placeholder="What is this callback about?" 
+                            value={callbackNote}
+                            onChange={(e) => setCallbackNote(e.target.value)}
+                            className="resize-none text-sm"
+                            rows={2}
+                        />
+                    </div>
                 </div>
 
                 <div className="flex flex-col gap-2 mt-2">

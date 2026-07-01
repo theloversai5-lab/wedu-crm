@@ -183,6 +183,16 @@ export default function LeadCard({ lead, teamMembers, onUpdate, showRevive = fal
                     )}
                 </div>
 
+                {/* Callback Note */}
+                {lead.callbackNote && (
+                    <div className="mb-3 px-3 py-2 bg-[#FFF5F5] border-l-2 border-[#E8536A] rounded-r-[6px]">
+                        <p className="text-[11px] text-gray-700 italic flex items-start gap-1.5">
+                            <span role="img" aria-label="note" className="text-[10px] mt-0.5">📅</span>
+                            {lead.callbackNote}
+                        </p>
+                    </div>
+                )}
+
                 {/* Action Buttons */}
                 <div className="flex items-center gap-2 flex-wrap">
                     {primaryWA && (

@@ -369,6 +369,9 @@ export default function Calendar() {
                                                 </Badge>
                                             )}
                                         </div>
+                                        {lead.callbackNote && (
+                                            <p className="mt-2 text-[11px] italic text-gray-500 whitespace-pre-wrap">{lead.callbackNote}</p>
+                                        )}
                                     </div>
                                 ))}
                             </div>

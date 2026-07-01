@@ -83,7 +83,12 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
         setError('');
 
         try {
-            await axios.post(`${API_URL}/api/leads`, formData, { withCredentials: true });
+            const payload = { ...formData };
+            if (!payload.followUpDate) {
+                delete payload.followUpDate; // prevent validation error for empty datetime string
+            }
+            
+            await axios.post(`${API_URL}/api/leads`, payload, { withCredentials: true });
             onSuccess();
             // Reset form
             setFormData({
@@ -104,7 +109,14 @@ export default function AddLeadModal({ open, onClose, onSuccess, teamMembers, de
                 followUpDate: ''
             });
         } catch (err) {
-            setError(err.response?.data?.detail || 'Failed to create lead');
+            const detail = err.response?.data?.detail;
+            if (Array.isArray(detail)) {
+                setError(detail.map(d => `${d.loc?.join('.')} - ${d.msg}`).join(', '));
+            } else if (typeof detail === 'string') {
+                setError(detail);
+            } else {
+                setError('Failed to create lead');
+            }
         } finally {
             setLoading(false);
         }

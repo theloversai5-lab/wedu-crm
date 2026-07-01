@@ -26,6 +26,7 @@ const baseNavItems = [
     { icon: GitBranch, label: 'Ongoing Project', path: '/category/ongoing-project', countKey: 'ongoingProject' },
     { icon: Globe, label: 'Send Portfolio', path: '/category/send-portfolio', countKey: 'sendPortfolio' },
     { icon: PhoneCall, label: 'Callback', path: '/category/callback', countKey: 'callback' },
+    { icon: XCircle, label: 'Not Interested', path: '/category/not-interested', countKey: 'notInterested' },
     { divider: true },
     { icon: Instagram, label: 'Instagram Leads', path: '/instagram', countKey: 'instagram' },
     { icon: MessageCircle, label: 'WhatsApp Leads', path: '/whatsapp', countKey: 'whatsapp' },

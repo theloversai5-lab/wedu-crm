@@ -94,6 +94,7 @@ export default function LeadOverview() {
     
     // Callback Modal state
     const [callbackModalOpen, setCallbackModalOpen] = useState(false);
+    const [newNote, setNewNote] = useState('');
     const debounceTimers = useRef({});
 
     const fetchLead = useCallback(async () => {
@@ -157,6 +158,20 @@ export default function LeadOverview() {
             navigate('/leads');
         } catch (err) {
             console.error('Delete error:', err);
+        }
+    };
+
+    const handleAddNote = async () => {
+        if (!newNote.trim()) return;
+        try {
+            const res = await axios.post(`${API_URL}/api/leads/${id}/notes`, {
+                text: newNote.trim()
+            }, { withCredentials: true });
+            
+            setLead(res.data);
+            setNewNote('');
+        } catch (err) {
+            console.error('Failed to add note:', err);
         }
     };
 
@@ -481,8 +496,70 @@ export default function LeadOverview() {
                             </div>
                         )}
                     </div>
+                    </div>
                 </div>
-            </div>
+
+                {/* Notes Section */}
+                <div className="mt-6 bg-white rounded-[16px] shadow-sm border border-gray-100 p-6">
+                    <h2 className="font-heading text-lg font-semibold text-gray-900 mb-4">Notes</h2>
+                    
+                    <div className="space-y-4 mb-6">
+                        {lead.callbackNote && (
+                            <div className="p-4 bg-[#FFF5F5] border-l-4 border-[#E8536A] rounded-r-[10px]">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span role="img" aria-label="calendar">📅</span>
+                                    <span className="font-semibold text-sm text-gray-900">Callback Note</span>
+                                </div>
+                                <p className="text-gray-700 text-sm whitespace-pre-wrap">{lead.callbackNote}</p>
+                                {lead.followUpDate && (
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        Scheduled for: {new Date(lead.followUpDate).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {(!lead.notes || lead.notes.length === 0) && !lead.callbackNote ? (
+                            <p className="text-gray-400 text-sm italic text-center py-4">No notes yet. Add the first note below.</p>
+                        ) : (
+                            lead.notes && [...lead.notes].reverse().map((note, idx) => (
+                                <div key={idx} className={`p-4 rounded-[10px] border ${note.source === 'system' ? 'bg-gray-50/50 border-gray-100/50 text-gray-500 italic' : 'bg-gray-50 border-gray-100 text-gray-700'}`}>
+                                    {note.source === 'system' && (
+                                        <div className="flex items-center gap-1.5 mb-1.5 text-gray-400 font-medium text-xs not-italic">
+                                            <span>📅</span>
+                                            <span>System Update</span>
+                                        </div>
+                                    )}
+                                    <p className="text-sm whitespace-pre-wrap">{note.text}</p>
+                                    <div className="flex items-center gap-2 mt-3 text-xs text-gray-400 not-italic">
+                                        <span className="font-medium text-gray-500">{note.createdBy}</span>
+                                        <span>•</span>
+                                        <span>{new Date(note.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <div className="space-y-3">
+                        <Textarea 
+                            placeholder="Write a note..." 
+                            value={newNote}
+                            onChange={(e) => setNewNote(e.target.value)}
+                            className="min-h-[100px] resize-none"
+                        />
+                        <div className="flex justify-end">
+                            <Button 
+                                onClick={handleAddNote}
+                                disabled={!newNote.trim()}
+                                className="bg-[#E8536A] hover:bg-[#D43D54] text-white"
+                            >
+                                Add Note
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+
             {/* Call Log Panel */}
             {showCallLog && (
                 <CallLogPanel

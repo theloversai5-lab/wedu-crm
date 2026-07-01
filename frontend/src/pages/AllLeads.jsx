@@ -573,52 +573,76 @@ export default function AllLeads() {
                                             </td>
                                             <td className="px-2 py-1 text-gray-600">{lead.phone2 || '-'}</td>
                                             <td className="px-2 py-1 text-gray-600">{lead.city || '-'}</td>
-                                            <td className="px-2 py-1">
-                                                {editingCell?.leadId === (lead.id || lead._id) && editingCell?.field === 'lastUpdate' ? (
-                                                    <div className="flex flex-col gap-1">
-                                                        <input 
-                                                            type="text"
-                                                            className="w-full text-[10px] border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-[#E8536A] focus:ring-1 focus:ring-[#E8536A]"
-                                                            autoFocus
-                                                            value={editValue}
-                                                            onChange={e => setEditValue(e.target.value)}
-                                                            onBlur={async () => {
-                                                                const prevLeads = [...leads];
-                                                                const leadId = lead.id || lead._id;
-                                                                console.log("Saving lastUpdate:", editValue, "for lead:", leadId);
-                                                                try {
-                                                                    setLeads(prev => prev.map(l => (l.id || l._id) === leadId ? { ...l, lastUpdate: editValue, lastUpdateDate: new Date().toISOString() } : l));
-                                                                    await axios.patch(`${API_URL}/api/leads/${leadId}`, { lastUpdate: editValue }, { withCredentials: true });
-                                                                } catch(e) {
-                                                                    console.error(e);
-                                                                    setLeads(prevLeads);
-                                                                }
-                                                                setEditingCell(null);
-                                                            }}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') {
-                                                                    e.target.blur();
-                                                                }
-                                                            }}
-                                                        />
-                                                    </div>
-                                                ) : (
-                                                    <div 
-                                                        className="cursor-pointer hover:bg-gray-50 min-h-[24px] p-1 rounded group flex flex-col"
-                                                        onClick={() => startEdit(lead.id || lead._id, 'lastUpdate', lead.lastUpdate || '')}
-                                                    >
-                                                        {lead.lastUpdate ? (
-                                                            <>
-                                                                <span className="text-[11px] text-gray-700 leading-tight truncate max-w-[150px]">{lead.lastUpdate}</span>
+                                            <td className="px-2 py-1 align-top">
+                                                <div className="flex flex-col group min-h-[24px] p-1 rounded hover:bg-gray-50">
+                                                    {lead.lastUpdate ? (
+                                                        <div className="flex justify-between items-start gap-2">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[11px] text-gray-700 leading-tight break-words max-w-[150px] line-clamp-2" title={lead.lastUpdate}>{lead.lastUpdate}</span>
                                                                 <span className="text-[9px] text-gray-400 mt-0.5">
                                                                     {lead.lastUpdateDate ? new Date(lead.lastUpdateDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}
                                                                 </span>
-                                                            </>
-                                                        ) : (
-                                                            <span className="text-[10px] text-gray-400 italic">Add note...</span>
-                                                        )}
-                                                    </div>
-                                                )}
+                                                            </div>
+                                                            <button 
+                                                                onClick={(e) => { e.stopPropagation(); startEdit(lead.id || lead._id, 'lastUpdate', ''); }}
+                                                                className="text-[#E8536A] opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-red-50 rounded"
+                                                                title="Add Note"
+                                                            >
+                                                                <Plus size={12} />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); startEdit(lead.id || lead._id, 'lastUpdate', ''); }}
+                                                            className="text-[10px] text-gray-400 italic text-left flex items-center gap-1 hover:text-[#E8536A]"
+                                                        >
+                                                            <Plus size={10} /> Add note...
+                                                        </button>
+                                                    )}
+                                                    
+                                                    {editingCell?.leadId === (lead.id || lead._id) && editingCell?.field === 'lastUpdate' && (
+                                                        <div className="flex flex-col gap-1 mt-2">
+                                                            <input 
+                                                                type="text"
+                                                                placeholder="Type new note..."
+                                                                className="w-full text-[10px] border border-gray-300 rounded px-1 py-1 outline-none focus:border-[#E8536A] focus:ring-1 focus:ring-[#E8536A]"
+                                                                autoFocus
+                                                                value={editValue}
+                                                                onChange={e => setEditValue(e.target.value)}
+                                                                onBlur={async () => {
+                                                                    if (!editValue.trim()) {
+                                                                        setEditingCell(null);
+                                                                        return;
+                                                                    }
+                                                                    const prevLeads = [...leads];
+                                                                    const leadId = lead.id || lead._id;
+                                                                    const nowIso = new Date().toISOString();
+                                                                    try {
+                                                                        setLeads(prev => prev.map(l => (l.id || l._id) === leadId ? { 
+                                                                            ...l, 
+                                                                            lastUpdate: editValue, 
+                                                                            lastUpdateDate: nowIso,
+                                                                            notes: [...(l.notes || []), { text: editValue, createdAt: nowIso, createdBy: 'You' }]
+                                                                        } : l));
+                                                                        await axios.post(`${API_URL}/api/leads/${leadId}/notes`, { text: editValue }, { withCredentials: true });
+                                                                    } catch(e) {
+                                                                        console.error(e);
+                                                                        setLeads(prevLeads);
+                                                                    }
+                                                                    setEditingCell(null);
+                                                                }}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') {
+                                                                        e.target.blur();
+                                                                    } else if (e.key === 'Escape') {
+                                                                        setEditValue('');
+                                                                        setEditingCell(null);
+                                                                    }
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-2 py-1">
                                                 {editingCell?.leadId === lead.id && editingCell?.field === 'type' ? (

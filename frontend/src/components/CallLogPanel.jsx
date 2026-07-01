@@ -116,7 +116,23 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
         }
     };
 
-    const responseHistory = fullLead?.responseHistory || [];
+    const rawResponses = fullLead?.responseHistory || [];
+    const rawNotes = fullLead?.notes || [];
+    
+    const unifiedTimeline = [
+        ...rawResponses.map(r => ({
+            ...r,
+            type: 'response',
+            sortDate: new Date(r.timestamp).getTime()
+        })),
+        ...rawNotes.map(n => ({
+            type: 'note',
+            text: n.text,
+            createdBy: n.createdBy,
+            createdAt: n.createdAt,
+            sortDate: new Date(n.createdAt).getTime()
+        }))
+    ].sort((a, b) => a.sortDate - b.sortDate);
     const lastContact = fullLead?.lastContactDate 
         ? new Date(fullLead.lastContactDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
         : 'Never';
@@ -280,17 +296,45 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
                     {/* Response History */}
                     <div className="space-y-3">
                         <h3 className="font-heading text-sm font-medium text-gray-700">Call History</h3>
-                        {responseHistory.length === 0 ? (
-                            <p className="text-[12px] text-gray-400 text-center py-4">No call history yet</p>
+                        {unifiedTimeline.length === 0 ? (
+                            <p className="text-[12px] text-gray-400 text-center py-4">No history yet</p>
                         ) : (
-                            [...responseHistory].reverse().map((entry, idx) => {
+                            [...unifiedTimeline].reverse().map((entry, idx) => {
+                                if (entry.type === 'note') {
+                                    const date = entry.createdAt ? new Date(entry.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown';
+                                    const isSystem = entry.source === 'system';
+                                    return (
+                                        <div key={`note-${idx}`} className={`bg-white border rounded-[10px] p-3 space-y-2 ${isSystem ? 'border-gray-200 bg-gray-50/50' : 'border-gray-100'}`}>
+                                            <div className="flex items-center justify-between">
+                                                {isSystem ? (
+                                                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500 flex items-center gap-1">
+                                                        <span role="img" aria-label="calendar">📅</span> System Note
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">
+                                                        General Note
+                                                    </span>
+                                                )}
+                                                <span className="text-[10px] text-gray-400">{date}</span>
+                                            </div>
+                                            <p className="text-[11px] text-gray-700 whitespace-pre-wrap">{entry.text}</p>
+                                            <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                                                <span className="flex items-center gap-1">
+                                                    <User size={10} />
+                                                    {entry.createdBy}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                
                                 const member = teamMembers?.find(m => m.id === entry.teamMember);
                                 const date = entry.timestamp 
                                     ? new Date(entry.timestamp).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                                     : 'Unknown';
                                 
                                 return (
-                                    <div key={`${entry.timestamp}-${entry.response}-${idx}`} className="bg-white border border-gray-100 rounded-[10px] p-3 space-y-2">
+                                    <div key={`resp-${entry.timestamp}-${idx}`} className="bg-white border border-gray-100 rounded-[10px] p-3 space-y-2">
                                         <div className="flex items-center justify-between">
                                             <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium ${getResponseColor(entry.response)}`}>
                                                 {entry.response}
@@ -323,7 +367,7 @@ export default function CallLogPanel({ lead, onClose, onUpdate, teamMembers }) {
                                             {entry.waSent && <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">WA Sent</span>}
                                         </div>
                                         {entry.followUpDate && (
-                                            <span className="text-[11px] text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
+                                            <span className="text-[11px] text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200 inline-block mt-1">
                                                 Next: {new Date(entry.followUpDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                                             </span>
                                         )}

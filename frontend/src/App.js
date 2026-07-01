@@ -76,13 +76,11 @@ function AppRoutes() {
                 
                 {/* Category Routes */}
                 <Route path="category/meeting-done" element={<CategoryPage category="Meeting Done" />} />
-                <Route path="category/interested" element={<CategoryPage category="Interested" />} />
-                <Route path="category/call-back" element={<CategoryPage category="Call Back" />} />
-                <Route path="category/busy" element={<CategoryPage category="Busy" />} />
-                <Route path="category/no-response" element={<CategoryPage category="No Response" />} />
-                <Route path="category/foreign" element={<CategoryPage category="Foreign" />} />
-                <Route path="category/future-projection" element={<CategoryPage category="Future Projection" />} />
-                <Route path="category/needs-review" element={<CategoryPage category="Needs Review" />} />
+                <Route path="category/highly-interested" element={<CategoryPage category="Highly Interested" />} />
+                <Route path="category/mnd" element={<CategoryPage category="MND" />} />
+                <Route path="category/ongoing-project" element={<CategoryPage category="Ongoing Project" />} />
+                <Route path="category/send-portfolio" element={<CategoryPage category="Send Portfolio" />} />
+                <Route path="category/callback" element={<CategoryPage category="Callback" />} />
                 <Route path="category/not-interested" element={<CategoryPage category="Not Interested" />} />
                 
                 {/* Other Routes */}
