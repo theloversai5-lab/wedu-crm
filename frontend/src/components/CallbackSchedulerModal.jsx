@@ -67,7 +67,7 @@ export default function CallbackSchedulerModal({ isOpen, onClose, lead, onSchedu
         }
         setIsSubmitting(false);
     };
-
+// fixed callback timing 
     const handleSkip = async () => {
         setIsSubmitting(true);
         try {
